@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotToDotDollars — The Gig Club</title>
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 80px 0 40px; text-align: center; }
+  header h1 { font-size: 2.6rem; letter-spacing: -1px; margin-bottom: 16px; }
+  header h1 .dot { color: var(--accent); }
+  header p.tag { color: var(--muted); font-size: 1.2rem; max-width: 640px; margin: 0 auto; }
+  header p.strike { margin-top: 12px; color: var(--muted); }
+  header p.strike s { color: #f85149; }
+  section { padding: 48px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.6rem; margin-bottom: 20px; text-align: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card h3 { margin-bottom: 8px; font-size: 1.05rem; }
+  .card h3 .gold { color: var(--gold); }
+  .card p { color: var(--muted); font-size: 0.95rem; }
+  .steps { display: grid; gap: 16px; max-width: 640px; margin: 0 auto; }
+  .step { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; }
+  .step h3 { font-size: 1.1rem; margin-bottom: 8px; }
+  .step h3 span { color: var(--gold); margin-right: 8px; }
+  .step p { color: var(--muted); }
+  form.join { max-width: 480px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+  form.join label { display: block; margin-bottom: 16px; font-size: 0.95rem; }
+  form.join input { width: 100%; margin-top: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #010409; color: var(--fg); font-size: 1rem; }
+  form.join button { width: 100%; background: var(--accent); color: #fff; border: none; padding: 14px; border-radius: 8px; font-weight: 600; font-size: 1.05rem; cursor: pointer; }
+  form.join button:hover { opacity: 0.9; }
+  #join-msg { text-align: center; margin-top: 16px; min-height: 1.5em; color: var(--gold); }
+  .fine { text-align: center; color: var(--muted); font-size: 0.9rem; margin-top: 24px; }
+  footer { padding: 40px 0 60px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Dot<span class="dot">To</span>Dot<span class="dot">Dollars</span></h1>
+  <p class="tag"><strong>Tired of the job hunt?</strong><br>Odd jobs and gigs, sent straight to you.</p>
+  <p class="strike"><s>Resumes</s> &nbsp;<s>Interviews</s> &nbsp;<s>Waiting rooms</s> &nbsp;— bleh.</p>
+</header>
+
+<section>
+  <h2>The deal</h2>
+  <div class="grid">
+    <div class="card"><h3>🆓 Free to join</h3><p>Membership costs nothing. Spots are limited — the club stays small on purpose.</p></div>
+    <div class="card"><h3>🚫 No hoops</h3><p>No resumes, no interviews, no gatekeeping. Show up and do good work.</p></div>
+    <div class="card"><h3><span class="gold">⭐ Earn dotts</span></h3><p>Finish gigs, earn dotts, climb the leaderboard. Higher rank means better gigs coming your way.</p></div>
+    <div class="card"><h3>💛 Donations welcome</h3><p>Donations keep the lights on — completely optional, never required.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="step"><h3><span>1</span>Join the club</h3><p>Fill in the form below. That's the whole application.</p></div>
+    <div class="step"><h3><span>2</span>Gigs come to you</h3><p>Jobs are assigned based on your leaderboard standing — the more you contribute, the better the gigs.</p></div>
+    <div class="step"><h3><span>3</span>Climb the board</h3><p>Do good work, earn dotts, move up. Show up, do the work, move up — that's the whole game.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Want in?</h2>
+  <form class="join" id="join-form">
+    <label>Your name
+      <input type="text" id="join-name" required maxlength="80" placeholder="What should we call you?">
+    </label>
+    <label>How do we reach you? <span style="color:var(--muted)">(phone or email)</span>
+      <input type="text" id="join-contact" required maxlength="120" placeholder="Phone or email">
+    </label>
+    <button type="submit">Count me in</button>
+    <div id="join-msg"></div>
+  </form>
+  <p class="fine">Safety circles welcome.</p>
+</section>
+
+<footer>
+  DotToDotDollars — the gig club.<br>
+  Built on the Triple Thumbs Up Mindset: Gratitude · Responsibility · Optimistic Action.
+</footer>
+
+</div>
+<script>
+document.getElementById('join-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('join-msg');
+  const name = document.getElementById('join-name').value.trim();
+  const contact = document.getElementById('join-contact').value.trim();
+  msg.textContent = 'Joining…';
+  try {
+    const res = await fetch('/v1/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, contact })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = "You're in! We'll be in touch soon.";
+    e.target.reset();
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+  }
+});
+</script>
+</body>
+</html>
