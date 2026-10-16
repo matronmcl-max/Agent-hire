@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meal Prep &amp; Home Cooking in Spokane, WA | DotToDotDollars</title>
+<meta name="description" content="Meal prep and home cooking in Spokane, WA. Home-cooked meals, weekly meal prep, grocery runs. Upfront price, no hidden fees. Book through the DotToDotDollars gig club.">
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.4rem; margin-bottom: 16px; }
+  ul { color: var(--muted); padding-left: 24px; margin-bottom: 16px; }
+  ul li { margin-bottom: 8px; }
+  p { color: var(--muted); margin-bottom: 16px; }
+  .cta { text-align: center; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-top: 24px; }
+  .cta a { display: inline-block; background: var(--accent); color: #fff; padding: 14px 32px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 8px; }
+  .cta a.gold { background: transparent; border: 1px solid var(--gold); color: var(--gold); }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Meal Prep &amp; Home Cooking in Spokane, WA</h1>
+  <p>Real home-cooked food, made for you. Upfront price, no surprises.</p>
+</header>
+
+<section>
+  <h2>What we cook</h2>
+  <ul>
+    <li>Weekly meal prep — a week's worth of meals, cooked and packed</li>
+    <li>Home-cooked dinners — comfort food, made from scratch</li>
+    <li>Grocery runs — your list, shopped and delivered</li>
+    <li>Special occasions — family dinners, small gatherings</li>
+  </ul>
+  <p>Tell us what you're craving or what you need for the week. Flat price agreed before anyone fires up the stove.</p>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <ul>
+    <li><strong>You describe what you need</strong> — meals for the week, a dinner, a grocery list.</li>
+    <li><strong>We quote upfront</strong> — flat price, agreed before the job starts.</li>
+    <li><strong>A club member cooks it</strong> — local, vetted by completed work.</li>
+    <li><strong>You approve, we get paid</strong> — your payment is held safely until the job's done right.</li>
+  </ul>
+  <p>The club keeps a flat 7% — out in the open, no hidden cuts.</p>
+</section>
+
+<div class="cta">
+  <p style="color:var(--fg); font-weight:600; margin-bottom:12px;">Hungry for home cooking?</p>
+  <a href="mailto:dottodotdollars@gmail.com?subject=Meal%20prep%20quote">Get a quote →</a>
+  <a class="gold" href="/">Join the gig club</a>
+</div>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

@@ -123,5 +123,18 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
   }
 });
 </script>
+<script>
+// Anonymous visit counter — no cookies, no personal data.
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>

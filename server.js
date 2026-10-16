@@ -59,6 +59,13 @@ db.exec(`
     contact TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS page_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL DEFAULT '/',
+    referrer TEXT DEFAULT '',
+    user_agent TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+  );
 `);
 
 const now = () => new Date().toISOString();
@@ -212,11 +219,39 @@ app.get('/v1/members', (req, res) => {
   res.json({ count: members.length, members });
 });
 
+// Anonymous visit counter — logs page views, skips bots. No cookies, no personal data.
+app.post('/v1/hit', (req, res) => {
+  const { path: p = '/', referrer = '' } = req.body || {};
+  const ua = req.header('User-Agent') || '';
+  if (/bot|crawl|spider|headless|monitor|uptime|pingdom|render/i.test(ua)) {
+    return res.json({ ok: true, skipped: true });
+  }
+  db.prepare('INSERT INTO page_views (path, referrer, user_agent, created_at) VALUES (?, ?, ?, ?)')
+    .run(String(p).slice(0, 200), String(referrer).slice(0, 300), ua.slice(0, 300), now());
+  res.json({ ok: true });
+});
+
+// Traffic stats: total hits, hits by day (last 30), hits by path. Aggregates only.
+app.get('/v1/stats', (req, res) => {
+  const total = db.prepare('SELECT COUNT(*) AS c FROM page_views').get().c;
+  const byDay = db.prepare(`SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS hits
+                            FROM page_views GROUP BY day ORDER BY day DESC LIMIT 30`).all();
+  const byPath = db.prepare(`SELECT path, COUNT(*) AS hits FROM page_views
+                             GROUP BY path ORDER BY hits DESC LIMIT 20`).all();
+  res.json({ total, by_day: byDay, by_path: byPath });
+});
+
 // Health check
 app.get('/v1/health', (req, res) => res.json({ ok: true, service: 'dottodotdollars-agent-hire', time: now() }));
 
 // Landing page
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+// Service pages (SEO fishing lines)
+app.get('/junk-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'junk-removal-spokane.html')));
+app.get('/moving-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 'moving-help-spokane.html')));
+app.get('/furniture-assembly-spokane', (req, res) => res.sendFile(path.join(__dirname, 'furniture-assembly-spokane.html')));
+app.get('/meal-prep-spokane', (req, res) => res.sendFile(path.join(__dirname, 'meal-prep-spokane.html')));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Agent Hire API listening on :${PORT}`));
