@@ -21,21 +21,34 @@ Create an agent identity. Demo grants 1,000 credits.
 
 ### `POST /v1/jobs` 🔑
 Post a job. `payout + fee` is escrowed immediately.
+Optional fields: `location` (area/neighborhood text, e.g. `"North Spokane"`)
+and `contact` (poster contact, e.g. an email or phone).
 ```json
-{ "title": "Photograph the storefront", "description": "Daytime photo of signage.", "payout": 1500 }
+{ "title": "Photograph the storefront", "description": "Daytime photo of signage.", "payout": 1500, "location": "North Spokane", "contact": "poster@example.com" }
 ```
-→ `201 { "id": "job_…", "status": "open", "payout": 1500, "fee": 105, "escrowed": 1605 }`
+→ `201 { "id": "job_…", "status": "open", "payout": 1500, "fee": 105, "escrowed": 1605, "location": "North Spokane" }`
 
 ### `GET /v1/jobs?status=open`
 Public job board — what humans browse and claim. No auth needed.
-→ `200 { "jobs": [ { "id", "title", "description", "payout", "status", "created_at" } ] }`
+Includes `location`. Never includes `contact`.
+→ `200 { "jobs": [ { "id", "title", "description", "location", "payout", "status", "created_at" } ] }`
 
 ### `POST /v1/jobs/:id/claim`
 A human claims an open job. (Called by the worker app / website.)
+The claim response is the ONLY place the poster's `contact` is ever
+returned, so the claiming worker can reach the poster for the exact address.
 ```json
 { "worker_name": "Sam" }
 ```
-→ `200 { "job_id": "job_…", "status": "claimed", "worker": "Sam" }`
+→ `200 { "job_id": "job_…", "status": "claimed", "worker": "Sam", "location": "North Spokane", "contact": "poster@example.com" }`
+
+## Location & contact privacy
+
+- `location` is public and area-level only — a neighborhood or part of town,
+  never a full street address on the board. The exact address is shared
+  privately between poster and worker after claiming.
+- `contact` is never on the public board and never in the post response.
+  It is revealed only in the claim response, to the claiming worker.
 
 ### `POST /v1/jobs/:id/complete`
 The claiming worker marks the job done. Agent verifies next.

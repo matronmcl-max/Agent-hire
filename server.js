@@ -34,6 +34,8 @@ db.exec(`
     agent_id TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    contact TEXT DEFAULT '',
     payout INTEGER NOT NULL,
     fee INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'open',
@@ -67,6 +69,14 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 `);
+
+// Location + contact columns were added after the jobs table first shipped,
+// so backfill databases created before them. Column names are hardcoded,
+// never user input. Existing rows pick up the '' default.
+for (const col of ['location', 'contact']) {
+  const exists = db.prepare(`SELECT COUNT(*) AS c FROM pragma_table_info('jobs') WHERE name = ?`).get(col).c;
+  if (!exists) db.exec(`ALTER TABLE jobs ADD COLUMN ${col} TEXT DEFAULT ''`);
+}
 
 const now = () => new Date().toISOString();
 const uid = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -104,8 +114,10 @@ app.post('/v1/agents/register', (req, res) => {
 });
 
 // Agent posts a job: payout + platform fee are escrowed immediately.
+// Optional: location (public area/neighborhood text) and contact (poster
+// contact, revealed ONLY to the claiming worker — never on the public board).
 app.post('/v1/jobs', agentAuth, (req, res) => {
-  const { title, description = '', payout } = req.body || {};
+  const { title, description = '', payout, location = '', contact = '' } = req.body || {};
   if (!title || !Number.isInteger(payout) || payout <= 0) {
     return res.status(400).json({ error: 'title and positive integer payout are required' });
   }
@@ -115,24 +127,31 @@ app.post('/v1/jobs', agentAuth, (req, res) => {
     return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: req.agent.balance });
   }
   const job = { id: uid('job'), agent_id: req.agent.id, title, description, payout, fee,
+                location: String(location).trim().slice(0, 120),
+                contact: String(contact).trim().slice(0, 120),
                 status: 'open', created_at: now() };
   const tx = db.transaction(() => {
     db.prepare('UPDATE agents SET balance = balance - ? WHERE id = ?').run(total, req.agent.id);
-    db.prepare(`INSERT INTO jobs (id, agent_id, title, description, payout, fee, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`)
-      .run(job.id, job.agent_id, job.title, job.description, job.payout, job.fee, job.created_at);
+    db.prepare(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`)
+      .run(job.id, job.agent_id, job.title, job.description, job.location, job.contact,
+           job.payout, job.fee, job.created_at);
     db.prepare(`INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
                 VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`)
       .run(job.id, req.agent.id, total, now());
   });
   tx();
-  res.status(201).json({ ...job, escrowed: total });
+  // Contact is never echoed back here: the claim response is the only place
+  // it is ever returned.
+  const { contact: _contact, ...jobOut } = job;
+  res.status(201).json({ ...jobOut, escrowed: total });
 });
 
 // Public job board: what humans can browse and claim.
+// Location is public; contact is NEVER included here.
 app.get('/v1/jobs', (req, res) => {
   const status = req.query.status || 'open';
-  const jobs = db.prepare(`SELECT id, title, description, payout, status, created_at
+  const jobs = db.prepare(`SELECT id, title, description, location, payout, status, created_at
                            FROM jobs WHERE status = ? ORDER BY created_at DESC`).all(status);
   res.json({ jobs });
 });
@@ -155,7 +174,11 @@ app.post('/v1/jobs/:id/claim', (req, res) => {
     db.prepare("UPDATE jobs SET status = 'claimed', worker_id = ? WHERE id = ?").run(worker.id, job.id);
   });
   tx();
-  res.json({ job_id: job.id, status: 'claimed', worker: worker.name });
+  // The claim response is the ONLY place the poster's contact is ever
+  // returned: the claiming worker needs it to reach the poster for the
+  // exact address. Location is public area-level text.
+  res.json({ job_id: job.id, status: 'claimed', worker: worker.name,
+             location: job.location || '', contact: job.contact || '' });
 });
 
 // Worker marks the job complete (agent then verifies + releases).
