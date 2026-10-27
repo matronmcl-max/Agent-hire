@@ -276,5 +276,9 @@ app.get('/moving-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 
 app.get('/furniture-assembly-spokane', (req, res) => res.sendFile(path.join(__dirname, 'furniture-assembly-spokane.html')));
 app.get('/meal-prep-spokane', (req, res) => res.sendFile(path.join(__dirname, 'meal-prep-spokane.html')));
 
+// Sitemap + robots (served explicitly — no static middleware)
+app.get('/sitemap.xml', (req, res) => res.sendFile(path.join(__dirname, 'sitemap.xml')));
+app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'robots.txt')));
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Agent Hire API listening on :${PORT}`));
