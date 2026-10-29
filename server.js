@@ -151,7 +151,7 @@ app.post('/v1/jobs', agentAuth, (req, res) => {
 // Location is public; contact is NEVER included here.
 app.get('/v1/jobs', (req, res) => {
   const status = req.query.status || 'open';
-  const jobs = db.prepare(`SELECT id, title, description, location, payout, status, created_at
+  const jobs = db.prepare(`SELECT id, title, description, location, payout, fee, status, created_at
                            FROM jobs WHERE status = ? ORDER BY created_at DESC`).all(status);
   res.json({ jobs });
 });
@@ -273,11 +273,18 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 // Human-readable traffic stats (aggregates only, from /v1/stats)
 app.get('/stats', (req, res) => res.sendFile(path.join(__dirname, 'stats.html')));
 
+// Proof page: completed / released jobs, anonymized, fee shown openly.
+app.get('/proof', (req, res) => res.sendFile(path.join(__dirname, 'proof.html')));
+
 // Service pages (SEO fishing lines)
 app.get('/junk-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'junk-removal-spokane.html')));
 app.get('/moving-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 'moving-help-spokane.html')));
 app.get('/furniture-assembly-spokane', (req, res) => res.sendFile(path.join(__dirname, 'furniture-assembly-spokane.html')));
 app.get('/meal-prep-spokane', (req, res) => res.sendFile(path.join(__dirname, 'meal-prep-spokane.html')));
+app.get('/lawn-mowing-spokane', (req, res) => res.sendFile(path.join(__dirname, 'lawn-mowing-spokane.html')));
+app.get('/snow-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'snow-removal-spokane.html')));
+app.get('/house-cleaning-spokane', (req, res) => res.sendFile(path.join(__dirname, 'house-cleaning-spokane.html')));
+app.get('/pet-sitting-dog-walking-spokane', (req, res) => res.sendFile(path.join(__dirname, 'pet-sitting-dog-walking-spokane.html')));
 
 // Sitemap + robots (served explicitly — no static middleware)
 app.get('/sitemap.xml', (req, res) => res.sendFile(path.join(__dirname, 'sitemap.xml')));

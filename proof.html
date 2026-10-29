@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proof — Completed Jobs &amp; the 7% Fee | DotToDotDollars</title>
+<meta name="description" content="Completed DotToDotDollars jobs, anonymized, with the flat 7% club fee shown out in the open. No names, no contacts, no hidden cuts.">
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.4rem; margin-bottom: 16px; }
+  p { color: var(--muted); margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .card h3 { margin-bottom: 8px; }
+  .card p { margin-bottom: 8px; }
+  .money { color: var(--gold); font-weight: 600; }
+  .example { border-style: dashed; }
+  .example-note { font-size: 0.9rem; color: var(--gold); }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  td:last-child, th:last-child { text-align: right; }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a, a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Proof</h1>
+  <p>Completed jobs, anonymized. The flat 7% fee, out in the open — no hidden cuts.</p>
+</header>
+
+<section>
+  <h2>Completed jobs</h2>
+  <p id="proof-note">Loading completed jobs…</p>
+  <div id="proof-list"></div>
+  <div id="proof-totals"></div>
+</section>
+
+<section>
+  <h2>How the money works</h2>
+  <p>When a job is posted, the payout is held safely until the work is approved. Then the worker gets paid, and the club keeps a flat 7% of the payout. That's it — no other cut, no surprise fees.</p>
+  <div class="card example">
+    <p class="example-note">EXAMPLE FORMAT — not a real job. Shown so you can see exactly how a completed job will appear here.</p>
+    <h3>Example: Yard cleanup</h3>
+    <p>Worker paid: <span class="money">$140</span></p>
+    <p>Club fee (7%): <span class="money">$10</span></p>
+    <p>Status: Released after approval</p>
+  </div>
+  <p>No names and no contact details ever appear on this page. Only the job, the payout, and the fee.</p>
+</section>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+fetch('/v1/jobs?status=released').then(function (r) { return r.json(); }).then(function (d) {
+  var jobs = (d && d.jobs) || [];
+  var note = document.getElementById('proof-note');
+  var list = document.getElementById('proof-list');
+  var totals = document.getElementById('proof-totals');
+  if (!jobs.length) {
+    note.textContent = 'No jobs have been completed and released yet. When the first one is, it will appear here — anonymized, with its payout and 7% fee shown.';
+    return;
+  }
+  note.textContent = jobs.length + ' completed job' + (jobs.length === 1 ? '' : 's') + ':';
+  var paid = 0, fees = 0;
+  list.innerHTML = jobs.map(function (j) {
+    var t = String(j.title || 'Job').replace(/</g, '&lt;');
+    var loc = String(j.location || '').replace(/</g, '&lt;');
+    var pay = Number(j.payout || 0), fee = Number(j.fee || 0);
+    paid += pay; fees += fee;
+    return '<div class="card"><h3>' + t + '</h3>'
+      + (loc ? '<p>📍 ' + loc + '</p>' : '')
+      + '<p>Worker paid: <span class="money">$' + pay + '</span></p>'
+      + '<p>Club fee (7%): <span class="money">$' + fee + '</span></p>'
+      + '<p>Status: Released after approval</p></div>';
+  }).join('');
+  totals.innerHTML = '<table><tr><th>Total paid to workers</th><td class="money">$' + paid + '</td></tr>'
+    + '<tr><th>Total club fees (7%)</th><td class="money">$' + fees + '</td></tr></table>';
+}).catch(function () {
+  document.getElementById('proof-note').textContent = 'Could not load completed jobs right now — try again in a bit.';
+});
+</script>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
