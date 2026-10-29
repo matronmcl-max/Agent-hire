@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Stats — DotToDotDollars</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; margin: 0 auto; max-width: 720px; padding: 24px; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.15rem; margin-top: 32px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #30363d; }
+  td:last-child, th:last-child { text-align: right; }
+  .total { font-size: 2.5rem; font-weight: 700; margin: 8px 0 0; }
+  .note, #error { color: #8b949e; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<h1>Site Stats</h1>
+<p class="note">Anonymous totals only — no cookies, no personal data. Counts restart when the site redeploys.</p>
+<p>Total hits</p>
+<p class="total" id="total">…</p>
+<h2>Hits by day (last 30 days)</h2>
+<table>
+  <thead><tr><th>Day</th><th>Hits</th></tr></thead>
+  <tbody id="by-day"></tbody>
+</table>
+<h2>Hits by page / link click</h2>
+<p class="note">Entries starting with <code>click:</code> are link clicks — e.g. <code>click:#join</code>, <code>click:#buyers</code>, or a mailto link for posting a job / API access.</p>
+<table>
+  <thead><tr><th>Page / click</th><th>Hits</th></tr></thead>
+  <tbody id="by-path"></tbody>
+</table>
+<p id="error"></p>
+<p><a href="/">Back to the site</a></p>
+<script>
+fetch('/v1/stats').then(function (r) { return r.json(); }).then(function (d) {
+  document.getElementById('total').textContent = d.total;
+  document.getElementById('by-day').innerHTML = (d.by_day || []).map(function (r) {
+    return '<tr><td>' + r.day + '</td><td>' + r.hits + '</td></tr>';
+  }).join('') || '<tr><td colspan="2">No hits yet</td></tr>';
+  document.getElementById('by-path').innerHTML = (d.by_path || []).map(function (r) {
+    return '<tr><td>' + r.path.replace(/</g, '&lt;') + '</td><td>' + r.hits + '</td></tr>';
+  }).join('') || '<tr><td colspan="2">No hits yet</td></tr>';
+}).catch(function () {
+  document.getElementById('error').textContent = 'Could not load stats right now — try again in a bit.';
+});
+</script>
+</body>
+</html>

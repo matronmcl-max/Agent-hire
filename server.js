@@ -270,6 +270,9 @@ app.get('/v1/health', (req, res) => res.json({ ok: true, service: 'dottodotdolla
 // Landing page
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
+// Human-readable traffic stats (aggregates only, from /v1/stats)
+app.get('/stats', (req, res) => res.sendFile(path.join(__dirname, 'stats.html')));
+
 // Service pages (SEO fishing lines)
 app.get('/junk-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'junk-removal-spokane.html')));
 app.get('/moving-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 'moving-help-spokane.html')));
