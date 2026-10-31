@@ -20,6 +20,7 @@ const path = require('path');
 
 const app = express();
 app.use(express.json());
+app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const PLATFORM_FEE_RATE = 0.07; // 7% per completed job
 const DEMO_GRANT = 1000;        // demo credits granted on agent registration
@@ -518,6 +519,9 @@ app.get('/stats', (req, res) => res.sendFile(path.join(__dirname, 'stats.html'))
 
 // Proof page: completed / released jobs, anonymized, fee shown openly.
 app.get('/proof', (req, res) => res.sendFile(path.join(__dirname, 'proof.html')));
+
+// Gig ideas page: all job-suggestion cards, moved off the homepage.
+app.get('/gig-ideas', (req, res) => res.sendFile(path.join(__dirname, 'gig-ideas.html')));
 
 // Service pages (SEO fishing lines)
 app.get('/junk-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'junk-removal-spokane.html')));

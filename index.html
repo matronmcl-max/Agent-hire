@@ -9,36 +9,49 @@
 <meta property="og:description" content="Post a gig or find local work in Spokane with DotToDotDollars. Yard work, moving, cleaning, repairs and more — you set the price, a local claims it.">
 <meta property="og:type" content="website">
 <style>
-  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  /* Color rule: links are blue, gold is for highlights, red is for
+     financial figures and important warnings. Everything else is
+     neutral white/grey text on the dark background. */
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --blue: #2f81f7; --gold: #d29922; --red: #f85149; --card: #161b22; --border: #30363d; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  a { color: var(--blue); }
   .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
-  header { padding: 80px 0 40px; text-align: center; }
+  header { padding: 64px 0 24px; text-align: center; }
   header h1 { font-size: 2.6rem; letter-spacing: -1px; margin-bottom: 16px; }
-  header h1 .dot { color: var(--accent); }
+  header h1 .gold { color: var(--gold); }
   header p.tag { color: var(--muted); font-size: 1.2rem; max-width: 640px; margin: 0 auto; }
   header p.strike { margin-top: 12px; color: var(--muted); }
-  header p.strike s { color: #f85149; }
-  section { padding: 48px 0; border-top: 1px solid var(--border); }
+  section { padding: 40px 0; border-top: 1px solid var(--border); }
   h2 { font-size: 1.6rem; margin-bottom: 20px; text-align: center; }
+  .gold { color: var(--gold); }
+  .red { color: var(--red); }
+  .muted { color: var(--muted); }
+  .center { text-align: center; }
+  .narrow { max-width: 640px; margin: 0 auto; }
+  /* Big action buttons: the homepage leads with these. */
+  .big-btn { display: block; width: 100%; padding: 18px 20px; margin: 12px 0; background: var(--blue); color: #fff; text-align: center; text-decoration: none; font-size: 1.2rem; font-weight: 700; border-radius: 12px; }
+  .big-btn:hover { opacity: 0.9; }
+  .btn-grid { display: grid; gap: 12px; max-width: 640px; margin: 0 auto; }
+  /* Clickable boxes: the whole box is the button, not a small link inside it. */
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
   .card h3 { margin-bottom: 8px; font-size: 1.05rem; }
-  .card h3 .gold { color: var(--gold); }
   .card p { color: var(--muted); font-size: 0.95rem; }
-  .cat { font-size: 1.2rem; margin: 28px 0 14px; }
-  .steps { display: grid; gap: 16px; max-width: 640px; margin: 0 auto; }
-  .step { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; }
-  .step h3 { font-size: 1.1rem; margin-bottom: 8px; }
-  .step h3 span { color: var(--gold); margin-right: 8px; }
-  .step p { color: var(--muted); }
+  .box-btn { display: block; text-decoration: none; color: var(--fg); }
+  .box-btn:hover { border-color: var(--blue); }
+  .box-btn .go { color: var(--blue); font-weight: 600; margin-top: 12px; }
   form.join { max-width: 480px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
   form.join label { display: block; margin-bottom: 16px; font-size: 0.95rem; }
   form.join input { width: 100%; margin-top: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #010409; color: var(--fg); font-size: 1rem; }
-  form.join button { width: 100%; background: var(--accent); color: #fff; border: none; padding: 14px; border-radius: 8px; font-weight: 600; font-size: 1.05rem; cursor: pointer; }
+  form.join button { width: 100%; background: var(--blue); color: #fff; border: none; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; cursor: pointer; }
   form.join button:hover { opacity: 0.9; }
   #join-msg { text-align: center; margin-top: 16px; min-height: 1.5em; color: var(--gold); }
   .fine { text-align: center; color: var(--muted); font-size: 0.9rem; margin-top: 24px; }
+  .hero img { width: 100%; border-radius: 12px; display: block; }
+  .hero figcaption { text-align: center; color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
+  .photo-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .photo-strip img { width: 100%; border-radius: 10px; display: block; }
   footer { padding: 40px 0 60px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
 </style>
 </head>
@@ -46,180 +59,80 @@
 <div class="wrap">
 
 <header>
-  <h1>Dot<span class="dot">To</span>Dot<span class="dot">Dollars</span></h1>
+  <h1>Dot<span class="gold">To</span>Dot<span class="gold">Dollars</span></h1>
   <p class="tag"><strong>Tired of the job hunt?</strong><br>Odd jobs and gigs, sent straight to you.</p>
   <p class="strike"><s>Resumes</s> &nbsp;<s>Interviews</s> &nbsp;<s>Waiting rooms</s> &nbsp;— bleh.</p>
-  <p style="margin-top:20px; font-size:1.05rem;"><a href="#join" style="color:var(--accent);">Want gigs? Join the club</a> &nbsp;·&nbsp; <a href="#buyers" style="color:var(--gold);">Need work done? Post a job</a> &nbsp;·&nbsp; <a href="#jobs" style="color:var(--fg);">Open jobs</a></p>
 </header>
 
-<section>
-  <h2>The deal</h2>
-  <div class="grid">
-    <div class="card"><h3>🆓 Free to join</h3><p>Membership costs nothing. Spots are limited — the club stays small on purpose.</p></div>
-    <div class="card"><h3>🚫 No hoops</h3><p>No resumes, no interviews, no ID checks. Show up and do good work.</p></div>
-    <div class="card"><h3><span class="gold">⭐ Earn dotts</span></h3><p>Finish gigs, earn dotts, climb the leaderboard. Higher rank means first pick of the best gigs.</p></div>
-    <div class="card"><h3>💛 Donations welcome</h3><p>Donations keep the lights on — completely optional, never required.</p></div>
+<figure class="hero" style="margin-bottom:24px;">
+  <img src="/images/spokane-water-power-night.jpg" alt="Washington Water Power building at night in Spokane, above the falls">
+  <figcaption>Spokane — where the club lives and works.</figcaption>
+</figure>
+
+<section style="border-top:none; padding-top:8px;">
+  <div class="btn-grid">
+    <a class="big-btn" href="#join">Join the club</a>
+    <a class="big-btn" href="#buyers">Post a job</a>
+    <a class="big-btn" href="#jobs">Open jobs</a>
+    <a class="big-btn" href="/mcp">Use the MCP endpoint</a>
+    <a class="big-btn" href="/gig-ideas">Browse gig ideas</a>
   </div>
+  <p class="center muted narrow" style="margin-top:20px;">Membership costs nothing. <span class="gold">No resumes, no interviews</span> — show up and do good work.</p>
 </section>
 
 <section>
-  <h2>How it works</h2>
-  <div class="steps">
-    <div class="step"><h3><span>1</span>Join the club</h3><p>Fill in the form below. That's the whole application.</p></div>
-    <div class="step"><h3><span>2</span>Pick your gigs</h3><p>Open jobs get posted to the club. Claim the ones you want — higher ranks get first pick.</p></div>
-    <div class="step"><h3><span>3</span>Climb the board</h3><p>Do good work, earn dotts, move up. Show up, do the work, move up — that's the whole game.</p></div>
-  </div>
+  <p class="center narrow" style="font-size:1.05rem;">This is my first website. I'm hoping for a job to be posted here that I can take — that's what will get this website off the ground.</p>
+  <p class="center narrow" style="font-size:1.05rem; margin-top:12px;">Please share this site with anyone who might need work done or want work — sharing is welcome and it really helps.</p>
 </section>
 
 <section id="jobs">
   <h2>Open jobs right now</h2>
-  <p style="text-align:center; color:var(--muted); max-width:640px; margin:0 auto 24px;">These are real jobs posted through the club — not copied from anywhere else. Claim one by joining the club below.</p>
-  <div id="jobs-list" class="grid" style="max-width:640px; margin:0 auto;">
-    <p style="color:var(--muted); text-align:center;">Loading open jobs…</p>
+  <p class="center muted narrow" style="margin-bottom:24px;">These are real jobs posted through the club — not copied from anywhere else. Claim one by joining the club below.</p>
+  <div id="jobs-list" class="grid narrow">
+    <p class="center muted">Loading open jobs…</p>
   </div>
-  <p style="text-align:center; margin-top:24px;"><a href="/proof" style="color:var(--gold);">See completed jobs and the 7% fee, out in the open →</a></p>
+  <p class="center" style="margin-top:24px;"><a href="/proof">See completed jobs and the <span class="red">7% fee</span>, out in the open →</a></p>
 </section>
 
 <section id="buyers">
   <h2>Need work done?</h2>
-  <p style="text-align:center; color:var(--muted); max-width:640px; margin:0 auto 24px;">Post the job. A verified club member does it. You only pay when it's done right.</p>
-  <div class="steps">
-    <div class="step"><h3><span>1</span>Post it</h3><p>Tell us what you need and what you'll pay. Your payment is held safely until the work is approved — never sent into the void.</p></div>
-    <div class="step"><h3><span>2</span>A member does it</h3><p>Someone from the club claims it and gets it done — shelf photos, property checks, local errands, whatever you need on the ground.</p></div>
-    <div class="step"><h3><span>3</span>You approve, they get paid</h3><p>Check the work. If it's right, the money releases to them. The club keeps a flat 7% — out in the open, no hidden cuts.</p></div>
-  </div>
-  <div class="grid" style="margin-top:24px;">
-    <div class="card"><h3>🧑 I'm a person</h3><p>Got a job? Send it our way and we'll get it posted and assigned.</p><p style="margin-top:12px;"><a href="mailto:dottodotdollars@gmail.com" style="color:var(--accent); font-weight:600;">Post a job →</a></p></div>
-    <div class="card"><h3>🤖 I'm building an AI agent</h3><p>Your agent can post jobs straight through the MCP endpoint — demo credits only for now, no real money yet.</p><p style="margin-top:12px;"><a href="/mcp" style="color:var(--accent); font-weight:600;">Use the MCP endpoint →</a></p></div>
+  <p class="center muted narrow" style="margin-bottom:24px;">Post the job. A verified club member does it. You only pay when it's done right.</p>
+  <ol class="narrow muted" style="margin-bottom:24px; padding-left:20px;">
+    <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay. Your payment is held safely until the work is approved.</li>
+    <li><strong style="color:var(--fg);">A member does it</strong> — someone from the club claims it and gets it done.</li>
+    <li><strong style="color:var(--fg);">You approve, they get paid</strong> — check the work. If it's right, the money releases to them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
+  </ol>
+  <div class="grid">
+    <a class="card box-btn" href="mailto:dottodotdollars@gmail.com">
+      <h3>🧑 I'm a person</h3>
+      <p>Got a job? Send it our way and we'll get it posted and assigned.</p>
+      <p class="go">Post a job →</p>
+    </a>
+    <a class="card box-btn" href="/mcp">
+      <h3>🤖 I'm building an AI agent</h3>
+      <p>Your agent can post jobs straight through the MCP endpoint.</p>
+      <p class="red" style="margin-top:8px;">Demo credits only for now, no real money yet.</p>
+      <p class="go">Use the MCP endpoint →</p>
+    </a>
   </div>
 </section>
 
 <section>
   <blockquote style="text-align:center; font-style:italic; font-size:1.1rem; max-width:640px; margin:0 auto 20px;">"A specialist's real value is their specialized intelligence — the judgment, know-how, and ways of working that set them apart from everyone else using the same tools."</blockquote>
-  <h2>Gig ideas</h2>
-  <p style="text-align:center; color:var(--muted); max-width:640px; margin:0 auto 24px;">We're not offering these services — we're seeking the people who do them. It's all in progress: when someone who specializes in one of these joins as a member, that service becomes available here. Do this work? Join and offer it. Need it done? Post it like any other job.</p>
-  <h3 class="cat" style="margin-top:6px;">Outdoors &amp; adventure</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Outdoor gigs and adventure lessons around Spokane — hunting and fishing guides, charters, kayak and gear rentals, dirt bikes, ATV trips, historic tours, and coaches.</p>
-  <div class="grid">
-    <div class="card"><h3>Skydiving instructions</h3><p>Want to learn to skydive? A licensed instructor walks you through safety, gear, and your first jump.</p></div>
-    <div class="card"><h3>Flight instructions</h3><p>Want to learn to fly? A licensed flight instructor teaches you the basics, in the air and on the ground.</p></div>
-    <div class="card"><h3>Scuba instructions</h3><p>Want to learn to scuba dive? A certified instructor teaches you safety, gear, and your first dives.</p></div>
-    <div class="card"><h3>Hunting guides</h3><p>Heading out hunting? A local guide takes you out, shows you the area, and helps you hunt safely.</p></div>
-    <div class="card"><h3>Fishing charters</h3><p>A local charter takes you out fishing, shows you the good spots and techniques, then cleans, prepares, cooks, and serves the fish.</p></div>
-    <div class="card"><h3>Kayak rentals</h3><p>Rent a kayak for the day and paddle local lakes and rivers, gear included.</p></div>
-    <div class="card"><h3>Dirt bikes</h3><p>Hit the trails on a dirt bike — rentals, guided rides, or lessons from a local rider.</p></div>
-    <div class="card"><h3>ATV travel</h3><p>ATV tours and trail rides — explore the backcountry on an ATV with a local guide.</p></div>
-    <div class="card"><h3>Historic tours</h3><p>Tour the old mines and historic spots of the Silver Valley in Shoshone County, with a guide who knows them well.</p></div>
-    <div class="card"><h3>Extreme sports coach</h3><p>Want to get into extreme sports? A local coach trains you safely.</p></div>
+  <p class="center muted narrow">We're seeking the people who do this work — when someone who specializes in one of these joins as a member, that service becomes available here.</p>
+  <div class="btn-grid" style="margin-top:24px;">
+    <a class="big-btn" href="/gig-ideas">Browse all gig ideas</a>
   </div>
-  <h3 class="cat">Yard &amp; seasonal</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Seasonal yard work in Spokane — leaf cleanup, snow removal, lawn mowing, tree planting and care, sprinkler blowouts, pest removal, and fire mitigation.</p>
-  <div class="grid">
-    <div class="card"><h3>Leaf cleanup</h3><p>Leaves piling up? A local worker rakes, blows, and bags them up.</p></div>
-    <div class="card"><h3>Fall yard clean up</h3><p>Leaves, branches, and yard waste into the bin or bags — a general tidy.</p></div>
-    <div class="card"><h3>Snow removal</h3><p>Snow piling up? A local worker shovels and clears driveways and sidewalks.</p></div>
-    <div class="card"><h3>Firewood</h3><p>Need firewood? A local worker cuts, stacks, and delivers it.</p></div>
-    <div class="card"><h3>Lawn mowing &amp; garden work</h3><p>Lawn needs mowing or garden work done? A local worker handles it.</p></div>
-    <div class="card"><h3>Pressure washing</h3><p>Driveways, decks, or siding need cleaning? A local worker pressure washes them.</p></div>
-    <div class="card"><h3>Window washing</h3><p>Windows need washing? A local worker washes them, inside and out.</p></div>
-    <div class="card"><h3>Tree planting &amp; care</h3><p>A professional plants your trees, then checks up on them as they grow — keeping them healthy and disease-free for their whole lifespan.</p></div>
-    <div class="card"><h3>Sprinkler blowouts</h3><p>Getting ready for winter? A local worker blows out your sprinkler lines so they don't freeze and break.</p></div>
-    <div class="card"><h3>Pest removal</h3><p>Got pests — skunks, raccoons, rodents, ants, wasps, or anything else? A local worker removes them from your home and yard.</p></div>
-    <div class="card"><h3>Tree removal &amp; top removal</h3><p>Need a tree taken down, or just the top removed? A local tree worker handles the dangerous work.</p></div>
-    <div class="card"><h3>Astroturf</h3><p>Want a lawn that never needs mowing? A local worker installs astroturf.</p></div>
-    <div class="card"><h3>Fire mitigation for real estate</h3><p>Selling or buying in wildfire country? A local worker clears brush and creates defensible space.</p></div>
+</section>
+
+<section>
+  <h2>Spokane River</h2>
+  <div class="photo-strip">
+    <img src="/images/spokane-river-rapids.jpg" alt="Spokane River rapids rushing past rocks">
+    <img src="/images/spokane-river-bridge.jpg" alt="Spokane River and bridge on a sunny day">
+    <img src="/images/spokane-river-rocks.jpg" alt="Spokane River rapids and rocks, bridge overhead">
   </div>
-  <h3 class="cat">Home repairs &amp; construction</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Home repairs and construction help in Spokane — roofing, fencing, trenching, modular home repairs, floor squeaks, dock building, and septic maintenance.</p>
-  <div class="grid">
-    <div class="card"><h3>Roofing</h3><p>Roof repairs, replacement, or a new roof from a local roofer.</p></div>
-    <div class="card"><h3>Home repairs</h3><p>General home repairs and fixes around the house from a local handyman.</p></div>
-    <div class="card"><h3>Modular home repairs</h3><p>Modular homes need different repairs than regular homes — a local handyman who knows modular homes handles them.</p></div>
-    <div class="card"><h3>Fixing floor squeaks</h3><p>Squeaky floors driving you nuts? A local handyman tracks down the squeak and fixes it.</p></div>
-    <div class="card"><h3>Fencing</h3><p>Need a fence built or repaired? A local worker builds and fixes fences.</p></div>
-    <div class="card"><h3>Asphalt, cement &amp; gravel</h3><p>Need a driveway or path laid or repaired? A local worker works in asphalt, cement, and gravel.</p></div>
-    <div class="card"><h3>Trenching</h3><p>Need a trench dug? A local worker digs trenches for utilities, drainage, and irrigation.</p></div>
-    <div class="card"><h3>Heavy equipment operators</h3><p>Need heavy equipment run? A local operator runs excavators, bulldozers, and other heavy machines.</p></div>
-    <div class="card"><h3>Dock building</h3><p>Need a dock built or repaired? A local worker builds docks.</p></div>
-    <div class="card"><h3>Septic tank maintenance</h3><p>Septic tank need maintenance? A local worker maintains your septic tank.</p></div>
-  </div>
-  <h3 class="cat">Food &amp; daily help</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Everyday help in Spokane — elder companions, meal prep, errands, catering, pet sitting and dog walking, dog training, house cleaning, and tech help.</p>
-  <div class="grid">
-    <div class="card"><h3>Elder day companion</h3><p>Hang out with an elder for the day — cook breakfast, lunch, or dinner, tidy the house, rides to appointments or the pharmacy.</p></div>
-    <div class="card"><h3>Meal prep</h3><p>Meals prepped for the week, cooked at home.</p></div>
-    <div class="card"><h3>Local errands</h3><p>Property checks, shelf photos, pickups, drop-offs.</p></div>
-    <div class="card"><h3>Catering</h3><p>Feeding a crowd? A local caterer cooks, delivers, and serves the food for your event.</p></div>
-    <div class="card"><h3>Pet sitting &amp; dog walking</h3><p>Going away or need a hand? A local sitter watches your pets and walks your dog.</p></div>
-    <div class="card"><h3>Dog training</h3><p>Got a dog that needs training? A local trainer teaches obedience, manners, and tricks.</p></div>
-    <div class="card"><h3>House cleaning</h3><p>Need a house cleaned or a deep clean? A local cleaner handles it.</p></div>
-    <div class="card"><h3>Tech help</h3><p>Lost in the digital age? A local helper sets up your phone or computer and shows you how it works.</p></div>
-  </div>
-  <h3 class="cat">Coaching &amp; learning</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Coaches and teachers in Spokane — learn a skill, skateboard lessons, bicycle training, personal fitness, and sports coaching.</p>
-  <div class="grid">
-    <div class="card"><h3>Learn a skill</h3><p>Want skills for a line of work? An expert gets paid to teach you — for example, a mechanic shows you how to install an alternator.</p></div>
-    <div class="card"><h3>Skateboard teaching</h3><p>Want to learn to skateboard? A local skater teaches you basics, tricks, and safety.</p></div>
-    <div class="card"><h3>Bicycle training</h3><p>Learn to ride, or ride better — a local cyclist trains you on balance, skills, and road confidence.</p></div>
-    <div class="card"><h3>Personal fitness trainer</h3><p>Want to get fit? A local personal trainer builds a plan and trains with you.</p></div>
-    <div class="card"><h3>Sports coach</h3><p>Got a local team? A local sports coach trains and coaches your team.</p></div>
-  </div>
-  <h3 class="cat">Wheels &amp; hauling</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Wheels, moving, and hauling in Spokane — car and gear rentals, towing and hauling, car detailing, junk haul and moving, and bicycle maintenance.</p>
-  <div class="grid">
-    <div class="card"><h3>Bicycle maintenance</h3><p>Bike needs work? A local mechanic tunes, repairs, and maintains your bicycle.</p></div>
-    <div class="card"><h3>Car rentals</h3><p>Need a car for a day or a trip? Rent a local car through the site.</p></div>
-    <div class="card"><h3>Gear rentals</h3><p>Got a dirt bike, ATV, kayak, or other gear? Post it up for rent so someone can find and rent it through the site — or even sell or buy.</p></div>
-    <div class="card"><h3>Towing &amp; hauling</h3><p>Need a dirt bike, horse trailer, or other load hauled? A local hauler moves it.</p></div>
-    <div class="card"><h3>Car detailing</h3><p>Car need a detail? A local detailer cleans it, inside and out.</p></div>
-    <div class="card"><h3>Junk haul &amp; moving</h3><p>Junk to haul, stuff to move, furniture to build.</p></div>
-    <div class="card"><h3>Movers for relocating</h3><p>Relocating? Local movers pack, load, and move your household to your new place.</p></div>
-  </div>
-  <h3 class="cat">Personal services</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Personal services in Spokane — barbers and stylists, massages, companions, and aquarium specialists.</p>
-  <div class="grid">
-    <div class="card"><h3>Local escorts</h3><p>Need company for dinner, an event, or a night out? Hire a local male or female escort for companionship.</p></div>
-    <div class="card"><h3>Massages</h3><p>Relaxation, deep tissue, or therapeutic massage from a local practitioner, at your place or theirs.</p></div>
-    <div class="card"><h3>Aquarium specialist</h3><p>Got an aquarium? A specialist who knows fish and ecosystems keeps your tank healthy and balanced.</p></div>
-    <div class="card"><h3>Barber &amp; haircutting</h3><p>Need a haircut? A local barber cuts hair, at your place or theirs.</p></div>
-    <div class="card"><h3>Stylist</h3><p>Need your hair styled? A local stylist cuts, colors, and styles hair.</p></div>
-  </div>
-  <h3 class="cat">Parties &amp; entertainment</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Party and entertainment help in Spokane — magic shows, stand-up comedy, birthday and bachelor parties, DJs, talent scouts, actors, extras, and stunt coordinators.</p>
-  <div class="grid">
-    <div class="card"><h3>Magic shows</h3><p>A local magician puts on a magic show for your party or event.</p></div>
-    <div class="card"><h3>Stand-up comedy</h3><p>Need laughs at your event? A local stand-up comic performs a set for your crowd.</p></div>
-    <div class="card"><h3>Birthday parties</h3><p>Throwing a birthday party? Hire someone to plan, set up, and run it.</p></div>
-    <div class="card"><h3>Bachelor parties</h3><p>Planning a bachelor party? Hire someone to plan and run a night to remember.</p></div>
-    <div class="card"><h3>DJ &amp; event setup/teardown</h3><p>Need a DJ for your party? A local DJ plays the music, and help sets up and tears down after.</p></div>
-    <div class="card"><h3>Talent scouts</h3><p>Looking for talent? A local scout finds performers and athletes for teams and productions.</p></div>
-    <div class="card"><h3>Actors</h3><p>Need actors? Local actors perform for film, stage, and productions.</p></div>
-    <div class="card"><h3>Extras</h3><p>Need extras for a production? Local extras fill out scenes.</p></div>
-    <div class="card"><h3>Stunt coordinators</h3><p>Need stunts done safely? A local stunt coordinator plans and choreographs stunt work.</p></div>
-  </div>
-  <h3 class="cat">Crafts &amp; trades</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Local crafts and trades in Spokane — taxidermy, leather work, woodwork, shoe shining, gunsmithing, cutlery, and blade sharpening.</p>
-  <div class="grid">
-    <div class="card"><h3>Taxidermist</h3><p>Got a trophy mount? A local taxidermist mounts and preserves animals.</p></div>
-    <div class="card"><h3>Leather work</h3><p>Need leather made or repaired? A local leather worker crafts and fixes leather goods.</p></div>
-    <div class="card"><h3>Woodwork</h3><p>Need woodwork done? A local woodworker builds tables, shelves, picnic tables, and more.</p></div>
-    <div class="card"><h3>Shoe shiners</h3><p>Bring back the old shoe shiners — a local shiner shines and polishes your shoes.</p></div>
-    <div class="card"><h3>Gunsmithing</h3><p>Got a firearm that needs work? A local gunsmith repairs, cleans, and customizes guns.</p></div>
-    <div class="card"><h3>Cutlery</h3><p>Need cutlery made or repaired? A local cutler crafts and fixes knives and kitchen blades.</p></div>
-    <div class="card"><h3>Blade sharpening</h3><p>Dull blades? A local sharpener puts a fresh edge on knives, scissors, and tools.</p></div>
-  </div>
-  <h3 class="cat">Farm &amp; harvest</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Farm and harvest work in Washington — cannabis trimming and related harvest work.</p>
-  <div class="grid">
-    <div class="card"><h3>Cannabis trimming</h3><p>Local farmers are always looking for trimmers — a local trimmer trims buds and helps with harvest work.</p></div>
-  </div>
-  <h3 class="cat">Investigation &amp; bail</h3>
-  <p class="cat-desc" style="color:var(--muted); font-size:0.95rem; margin-bottom:14px;">Investigation and bail help in Spokane — private investigators, bounty hunters, and bail bonds.</p>
-  <div class="grid">
-    <div class="card"><h3>Private investigator</h3><p>Need something looked into? A local private investigator investigates discreetly.</p></div>
-    <div class="card"><h3>Bounty hunters</h3><p>Need a fugitive found? A local bounty hunter tracks down people who skipped bail.</p></div>
-    <div class="card"><h3>Bail bonds</h3><p>Need bail posted? A local bail bonds agent posts bail for you.</p></div>
-  </div>
+  <p class="center muted narrow" style="margin-top:16px;">Local work, local people — right here in Spokane.</p>
 </section>
 
 <section id="join">
@@ -228,7 +141,7 @@
     <label>Your name
       <input type="text" id="join-name" required maxlength="80" placeholder="What should we call you?">
     </label>
-    <label>How do we reach you? <span style="color:var(--muted)">(phone or email)</span>
+    <label>How do we reach you? <span class="muted">(phone or email)</span>
       <input type="text" id="join-contact" required maxlength="120" placeholder="Phone or email">
     </label>
     <button type="submit">Count me in</button>
@@ -268,26 +181,27 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
 <script>
 // Open jobs board — TTUM's own jobs only, from GET /v1/jobs.
 // Never shows contact info: the API does not return it publicly.
+// Each job card is a whole-card button to the join form (claim by joining).
 fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
   var el = document.getElementById('jobs-list');
   if (!el) return;
   var jobs = (d && d.jobs) || [];
   if (!jobs.length) {
-    el.innerHTML = '<p style="color:var(--muted); text-align:center;">No open jobs right now. Check back soon — or post one and a club member will claim it.</p>';
+    el.innerHTML = '<p class="center muted">No open jobs right now. Check back soon — or post one and a club member will claim it.</p>';
     return;
   }
   el.innerHTML = jobs.map(function (j) {
     var t = String(j.title || '').replace(/</g, '&lt;');
     var desc = String(j.description || '').replace(/</g, '&lt;');
     var loc = String(j.location || '').replace(/</g, '&lt;');
-    return '<div class="card"><h3>' + t + '</h3>'
+    return '<a class="card box-btn" href="#join"><h3>' + t + '</h3>'
       + (desc ? '<p>' + desc + '</p>' : '')
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
-      + '<p style="margin-top:12px; color:var(--gold); font-weight:600;">Pays $' + Number(j.payout || 0) + '</p></div>';
+      + '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + Number(j.payout || 0) + '</p></a>';
   }).join('');
 }).catch(function () {
   var el = document.getElementById('jobs-list');
-  if (el) el.innerHTML = '<p style="color:var(--muted); text-align:center;">Could not load open jobs right now — try again in a bit.</p>';
+  if (el) el.innerHTML = '<p class="center muted">Could not load open jobs right now — try again in a bit.</p>';
 });
 </script>
 <script>
@@ -303,8 +217,7 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
   } catch (e) {}
 })();
 // Anonymous link-click tracking — same /v1/hit endpoint, path prefixed
-// 'click:'. Covers the main calls to action: Join the club (#join),
-// Post a job (#buyers and mailto), Get API access (mailto).
+// 'click:'. Covers the main calls to action.
 document.addEventListener('click', function (e) {
   try {
     var a = e.target && e.target.closest ? e.target.closest('a') : null;
