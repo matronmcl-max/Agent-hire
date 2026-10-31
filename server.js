@@ -378,6 +378,138 @@ app.get('/v1/stats', async (req, res, next) => {
 // Health check (also reports which database backend is active — no secrets).
 app.get('/v1/health', (req, res) => res.json({ ok: true, service: 'dottodotdollars-agent-hire', time: now(), db_backend: DB_BACKEND }));
 
+// ---------- MCP wrapper (small, demo-only) ----------
+// POST /mcp is a thin JSON-RPC wrapper around the existing /v1 routes.
+// It adds NO new money logic and NO new auth bypass: post_job forwards
+// to POST /v1/jobs with the caller's api_key as X-API-Key, so the
+// existing agentAuth check still applies and anonymous posting is
+// rejected. All balances here are DEMO CREDITS, not real money.
+// Supported JSON-RPC methods: initialize, notifications/initialized,
+// tools/list, tools/call, ping. GET /mcp is a human-readable info page.
+const MCP_TOOLS = [
+  {
+    name: 'register_agent',
+    description: 'Register a new AI agent. Grants 1000 DEMO credits only (not real money). Returns agent_id and api_key — keep the api_key secret.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'Name for the agent' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'post_job',
+    description: 'Post a job, escrowing payout + 7% fee in DEMO credits. Requires a valid api_key argument (from register_agent); anonymous posting is rejected.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'Agent API key (never echoed back)' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        payout: { type: 'integer', description: 'Payout in demo credits, positive integer' },
+        location: { type: 'string', description: 'Public area/neighborhood text' },
+        contact: { type: 'string', description: 'Poster contact, revealed only to the claiming worker' },
+      },
+      required: ['api_key', 'title', 'payout'],
+    },
+  },
+  {
+    name: 'list_open_jobs',
+    description: 'List open jobs on the public board. Location is public; contact details are never included.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+];
+
+async function mcpForward(req, method, path, body, apiKey) {
+  // Forward to the same server's existing /v1 route so all validation,
+  // auth, escrow and privacy rules stay in exactly one place.
+  const base = `${req.protocol}://${req.get('host')}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-API-Key'] = apiKey;
+  const upstream = await fetch(base + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await upstream.json(); } catch (_) { data = null; }
+  return { ok: upstream.ok, status: upstream.status, data };
+}
+
+function mcpTextResult(data) {
+  return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+}
+function mcpErrorResult(message) {
+  return { content: [{ type: 'text', text: String(message) }], isError: true };
+}
+
+app.get('/mcp', (req, res) => {
+  const rows = MCP_TOOLS.map((t) => `<li><strong>${t.name}</strong> — ${t.description}</li>`).join('');
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>MCP — DotToDotDollars Agent Hire</title></head><body>
+<h1>MCP endpoint: POST /mcp</h1>
+<p><strong>DEMO CREDITS ONLY — NOT REAL MONEY.</strong> Jobs posted here use demo credits. No real dollars are held or paid out through this endpoint.</p>
+<p>Send JSON-RPC 2.0 requests to POST /mcp with methods: initialize, tools/list, tools/call, ping. Posting a job requires a valid api_key argument; anonymous posting is rejected.</p>
+<h2>Tools</h2><ul>${rows}</ul>
+<p>Example initialize request body: {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"example-client","version":"1.0"}}}</p>
+</body></html>`);
+});
+
+app.post('/mcp', async (req, res, next) => {
+  try {
+    const rpc = req.body || {};
+    const { method, params = {}, id } = rpc;
+    const isNotification = id === undefined || id === null;
+    const ok = (result) => res.json({ jsonrpc: '2.0', id, result });
+    const fail = (code, message) => res.json({ jsonrpc: '2.0', id, error: { code, message } });
+
+    if (typeof method !== 'string') return fail(-32600, 'Invalid Request: method is required');
+
+    if (method === 'notifications/initialized') {
+      // MCP notification: no response body is expected.
+      return res.status(202).end();
+    }
+    if (isNotification) return res.status(202).end();
+
+    if (method === 'initialize') {
+      return ok({
+        protocolVersion: params.protocolVersion || '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'dottodotdollars-agent-hire', version: '1.0.0' },
+        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Tools: register_agent, post_job (requires api_key), list_open_jobs.',
+      });
+    }
+    if (method === 'ping') return ok({});
+    if (method === 'tools/list') return ok({ tools: MCP_TOOLS });
+
+    if (method === 'tools/call') {
+      const args = (params && params.arguments) || {};
+      const name = params && params.name;
+      if (name === 'register_agent') {
+        if (!args.name || !String(args.name).trim()) return ok(mcpErrorResult('name is required'));
+        const r = await mcpForward(req, 'POST', '/v1/agents/register', { name: args.name });
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'post_job') {
+        if (!args.api_key) return ok(mcpErrorResult('api_key is required — posting anonymously is not allowed'));
+        if (!args.title || !Number.isInteger(args.payout) || args.payout <= 0) {
+          return ok(mcpErrorResult('title and positive integer payout are required'));
+        }
+        const r = await mcpForward(req, 'POST', '/v1/jobs', {
+          title: args.title, description: args.description || '', payout: args.payout,
+          location: args.location || '', contact: args.contact || '',
+        }, args.api_key);
+        // Upstream strips contact and never echoes the api_key; forward as-is.
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'list_open_jobs') {
+        const r = await mcpForward(req, 'GET', '/v1/jobs?status=open');
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      return ok(mcpErrorResult(`Unknown tool: ${name}`));
+    }
+    return fail(-32601, `Method not found: ${method}`);
+  } catch (e) { next(e); }
+});
+
 // Landing page
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
