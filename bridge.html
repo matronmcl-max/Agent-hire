@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bridge — DotToDotDollars</title>
+<meta name="description" content="Play bridge on DotToDotDollars: you as South, with three robot players. Real bidding, real card play.">
+<style>
+  /* Same tidy rules as the homepage: links blue, gold for highlights,
+     red only for important warnings/results. Everything else neutral. */
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --blue: #2f81f7; --gold: #d29922; --red: #f85149; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  a { color: var(--blue); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px 60px; }
+  header { padding: 32px 0 16px; text-align: center; }
+  header h1 { font-size: 2rem; }
+  header h1 .gold { color: var(--gold); }
+  .muted { color: var(--muted); }
+  .gold { color: var(--gold); }
+  .red { color: var(--red); }
+  .center { text-align: center; }
+  .narrow { max-width: 640px; margin: 0 auto; }
+  .box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .box h2, .box h3 { margin-bottom: 8px; }
+  .big-btn { display: block; width: 100%; padding: 16px; margin: 12px 0; background: var(--blue); color: #fff; text-align: center; font-size: 1.15rem; font-weight: 700; border-radius: 12px; border: none; cursor: pointer; }
+  .big-btn:disabled { opacity: 0.4; cursor: default; }
+  /* Bidding grid: big tappable buttons, one per bid. */
+  .bid-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+  .bid-btn { padding: 14px 4px; font-size: 1.05rem; font-weight: 700; border-radius: 10px; border: 1px solid var(--border); background: #1c2128; color: var(--fg); cursor: pointer; }
+  .bid-btn:disabled { opacity: 0.35; cursor: default; }
+  .bid-btn:not(:disabled) { background: var(--blue); color: #fff; }
+  /* Cards: big, tappable, white like real cards. */
+  .hand { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .card-btn { min-width: 56px; padding: 14px 10px; font-size: 1.25rem; font-weight: 700; border-radius: 10px; border: 2px solid var(--border); background: #fff; color: #111; cursor: pointer; }
+  .card-btn.red-suit { color: #c00; }
+  .card-btn:disabled { opacity: 0.35; cursor: default; background: #ddd; }
+  .card-btn:not(:disabled):hover { border-color: var(--blue); }
+  .trick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .trick span { background: #1c2128; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  table.auction { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.auction th, table.auction td { padding: 6px; text-align: center; border-bottom: 1px solid var(--border); }
+  #status { min-height: 1.6em; }
+  #error { min-height: 1.6em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Bridge at Dot<span class="gold">To</span>Dot<span class="gold">Dollars</span></h1>
+    <p class="muted narrow">You play as <strong style="color:var(--fg);">South</strong>. North is your partner. East and West are the other team. All three are robots.</p>
+    <p class="center" style="margin-top:12px;"><a href="/">← Back to the homepage</a></p>
+  </header>
+
+  <div class="box">
+    <p id="status" class="center">Dealing a hand…</p>
+    <p id="error" class="center red"></p>
+    <p class="center muted" id="meta"></p>
+  </div>
+
+  <div class="box" id="auction-box" style="display:none;">
+    <h3>Bidding so far</h3>
+    <table class="auction">
+      <thead><tr><th>North</th><th>East</th><th>South (you)</th><th>West</th></tr></thead>
+      <tbody id="auction-body"></tbody>
+    </table>
+    <p class="muted" style="margin-top:8px;">Bidding in plain words: each bid says how many tricks your team thinks it will win, over the first six. Pass means "not this time." Double means "I think they will fail." A contract is set when three players in a row pass.</p>
+  </div>
+
+  <div class="box" id="bid-box" style="display:none;">
+    <h3>Your bid</h3>
+    <p class="muted">Tap a bid. Only bids that are allowed right now can be tapped.</p>
+    <div class="bid-grid" id="bid-grid"></div>
+  </div>
+
+  <div class="box" id="contract-box" style="display:none;">
+    <h3>Contract</h3>
+    <p id="contract-text"></p>
+    <p class="muted" id="trick-score"></p>
+  </div>
+
+  <div class="box" id="trick-box" style="display:none;">
+    <h3>Cards on the table now</h3>
+    <div class="trick" id="trick-now"></div>
+  </div>
+
+  <div class="box" id="dummy-box" style="display:none;">
+    <h3 id="dummy-title">Partner's cards (face up)</h3>
+    <p class="muted" id="dummy-note"></p>
+    <div class="hand" id="dummy-hand"></div>
+  </div>
+
+  <div class="box" id="play-box" style="display:none;">
+    <h3 id="play-title">Your cards</h3>
+    <p class="muted" id="play-note"></p>
+    <div class="hand" id="play-hand"></div>
+  </div>
+
+  <div class="box" id="result-box" style="display:none;">
+    <h3>Hand finished</h3>
+    <p id="result-text"></p>
+    <button class="big-btn" id="new-hand">Deal a new hand</button>
+  </div>
+
+  <div class="box">
+    <h3>How the robots play</h3>
+    <p class="muted">The robots use a simple beginner system for bidding and simple rules for card play — they play like beginners, not experts. That is on purpose for this first version: easy to learn against, and the game stays simple. Stronger robot play can come later.</p>
+  </div>
+</div>
+<script src="/bridge.js"></script>
+</body>
+</html>

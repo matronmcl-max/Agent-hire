@@ -533,6 +533,38 @@ app.get('/snow-removal-spokane', (req, res) => res.sendFile(path.join(__dirname,
 app.get('/house-cleaning-spokane', (req, res) => res.sendFile(path.join(__dirname, 'house-cleaning-spokane.html')));
 app.get('/pet-sitting-dog-walking-spokane', (req, res) => res.sendFile(path.join(__dirname, 'pet-sitting-dog-walking-spokane.html')));
 
+// Bridge prototype (local first version): solo game, you as South + 3 bots.
+// In-memory only, no database, no money. Engine: bridge-engine (MIT).
+const bridgeGame = require('./bridge-game');
+app.get('/bridge', (req, res) => res.sendFile(path.join(__dirname, 'bridge.html')));
+app.get('/bridge.js', (req, res) => res.sendFile(path.join(__dirname, 'bridge.js')));
+app.post('/v1/bridge/new', async (req, res, next) => {
+  try {
+    const session = bridgeGame.newSession();
+    await bridgeGame.startSession(session);
+    // Give the background loop a tick to reach the first human turn.
+    await new Promise((r) => setTimeout(r, 50));
+    res.json(bridgeGame.serialize(session));
+  } catch (e) { next(e); }
+});
+app.get('/v1/bridge/state', (req, res) => {
+  const session = bridgeGame.getSession(req.query.session);
+  if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
+  res.json(bridgeGame.serialize(session));
+});
+app.post('/v1/bridge/bid', (req, res) => {
+  const session = bridgeGame.getSession(req.body.session);
+  if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
+  try { bridgeGame.submitBid(session, req.body.bid); } catch (e) { return res.status(400).json({ error: e.message }); }
+  res.json(bridgeGame.serialize(session));
+});
+app.post('/v1/bridge/play', (req, res) => {
+  const session = bridgeGame.getSession(req.body.session);
+  if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
+  try { bridgeGame.submitPlay(session, req.body.card); } catch (e) { return res.status(400).json({ error: e.message }); }
+  res.json(bridgeGame.serialize(session));
+});
+
 // Sitemap + robots (served explicitly — no static middleware)
 app.get('/sitemap.xml', (req, res) => res.sendFile(path.join(__dirname, 'sitemap.xml')));
 app.get('/robots.txt', (req, res) => res.sendFile(path.join(__dirname, 'robots.txt')));
