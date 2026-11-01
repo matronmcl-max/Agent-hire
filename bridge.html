@@ -36,8 +36,13 @@
   .card-btn.red-suit { color: #c00; }
   .card-btn:disabled { opacity: 0.35; cursor: default; background: #ddd; }
   .card-btn:not(:disabled):hover { border-color: var(--blue); }
-  .trick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .trick span { background: #1c2128; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  /* The table: North top, West left, East right, South bottom — like sitting at a real table. */
+  .table-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; margin-top: 12px; text-align: center; }
+  .table-slot { background: #1c2128; border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px; min-height: 78px; }
+  .table-slot .seat { font-size: 0.85rem; color: var(--muted); }
+  .table-slot .played { font-size: 1.7rem; font-weight: 700; display: block; margin-top: 4px; }
+  .table-slot .played.red-suit { color: #f85149; }
+  .table-center { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; }
   table.auction { width: 100%; border-collapse: collapse; margin-top: 8px; }
   table.auction th, table.auction td { padding: 6px; text-align: center; border-bottom: 1px solid var(--border); }
   #status { min-height: 1.6em; }
@@ -56,6 +61,21 @@
     <p id="status" class="center">Dealing a hand…</p>
     <p id="error" class="center red"></p>
     <p class="center muted" id="meta"></p>
+  </div>
+
+  <div class="box" id="trick-box" style="display:none;">
+    <h3>Table — cards played this trick</h3>
+    <div class="table-grid">
+      <div></div>
+      <div class="table-slot" id="trick-N"><span class="seat">North (partner)</span><span class="played">—</span></div>
+      <div></div>
+      <div class="table-slot" id="trick-W"><span class="seat">West</span><span class="played">—</span></div>
+      <div class="table-center">Cards on the table</div>
+      <div class="table-slot" id="trick-E"><span class="seat">East</span><span class="played">—</span></div>
+      <div></div>
+      <div class="table-slot" id="trick-S"><span class="seat">South (you)</span><span class="played">—</span></div>
+      <div></div>
+    </div>
   </div>
 
   <div class="box" id="auction-box" style="display:none;">
@@ -77,11 +97,6 @@
     <h3>Contract</h3>
     <p id="contract-text"></p>
     <p class="muted" id="trick-score"></p>
-  </div>
-
-  <div class="box" id="trick-box" style="display:none;">
-    <h3>Cards on the table now</h3>
-    <div class="trick" id="trick-now"></div>
   </div>
 
   <div class="box" id="dummy-box" style="display:none;">

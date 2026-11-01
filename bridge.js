@@ -120,14 +120,20 @@
         (c.declarer && (c.declarer === 'N' || c.declarer === 'S') ? state.defenseTricks : state.declarerTricks);
     }
 
-    // Current trick.
-    show($('trick-box'), state.currentTrick.length > 0);
-    var trickEl = $('trick-now');
-    trickEl.innerHTML = '';
-    state.currentTrick.forEach(function (p) {
-      var s = document.createElement('span');
-      s.textContent = p.byName + ': ' + p.text;
-      trickEl.appendChild(s);
+    // Current trick — shown as a real table, North top, West left,
+    // East right, South bottom, so you can see who played what.
+    var trick = state.currentTrick || [];
+    show($('trick-box'), trick.length > 0);
+    ['N', 'W', 'E', 'S'].forEach(function (seat) {
+      var slot = $('trick-' + seat);
+      if (!slot) return;
+      var played = slot.querySelector('.played');
+      var p = null;
+      trick.forEach(function (t) { if (t.by === seat) p = t; });
+      if (played) {
+        played.textContent = p ? p.text : '—';
+        played.className = 'played' + ((p && (p.text.indexOf('♥') >= 0 || p.text.indexOf('♦') >= 0)) ? ' red-suit' : '');
+      }
     });
 
     // Dummy hand: face up after the opening lead. If you are the
