@@ -10,6 +10,25 @@
   try { var saved = JSON.parse(localStorage.getItem('bridgeTotal') || 'null'); if (saved) total = saved; } catch (e) {}
   var countedSession = null;
   var seatNames = { N: 'North', E: 'East', S: 'South (you)', W: 'West' };
+  var manualPaused = false, autoPaused = false;
+  function sendPause(paused) {
+    if (!session) return;
+    fetch('/v1/bridge/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: session, paused: paused }) })
+      .then(function (res) { return res.json(); })
+      .then(function (state) { render(state); });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      if (!manualPaused && !autoPaused) { autoPaused = true; sendPause(true); }
+    } else if (autoPaused && !manualPaused) {
+      autoPaused = false; sendPause(false);
+    }
+  });
+  $('pause-btn').addEventListener('click', function () {
+    manualPaused = !manualPaused;
+    autoPaused = false;
+    sendPause(manualPaused);
+  });
   var $ = function (id) { return document.getElementById(id); };
   var statusEl = $('status'), errorEl = $('error'), metaEl = $('meta');
 
@@ -74,7 +93,10 @@
       '  •  Your team: North + South';
     renderAuction(state);
 
-    if (state.status === 'bidding') {
+    $('pause-btn').textContent = state.paused ? 'Resume the robots' : 'Pause the robots';
+    if (state.paused && state.status !== 'complete') {
+      statusEl.textContent = 'Paused — the robots are waiting for you. Nothing will move until you come back.';
+    } else if (state.status === 'bidding') {
       statusEl.textContent = state.pending
         ? 'Your turn to bid.'
         : 'The robots are bidding…';

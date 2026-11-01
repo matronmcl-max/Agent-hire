@@ -593,6 +593,12 @@ app.post('/v1/bridge/play', async (req, res) => {
   try { bridgeGame.submitPlay(session, req.body.card); } catch (e) { return res.status(400).json({ error: e.message }); }
   res.json(bridgeGame.serialize(session));
 });
+app.post('/v1/bridge/pause', async (req, res) => {
+  const session = await getOrRestoreBridgeSession(req.body.session);
+  if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
+  bridgeGame.setPaused(session, req.body.paused);
+  res.json(bridgeGame.serialize(session));
+});
 
 // Sitemap + robots (served explicitly — no static middleware)
 app.get('/sitemap.xml', (req, res) => res.sendFile(path.join(__dirname, 'sitemap.xml')));

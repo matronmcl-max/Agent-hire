@@ -59,14 +59,28 @@ class HumanPlayer extends BridgePlayerBase {
 // turns) used to race to the finish before you could see a single trick.
 // Slow every robot card play down so the table is actually watchable.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitWhilePaused(getPaused) {
+  while (getPaused && getPaused()) await sleep(500);
+}
 class SlowCardPlayer {
-  constructor(inner) { this._inner = inner; }
+  constructor(inner, getPaused) { this._inner = inner; this._getPaused = getPaused; }
   get seat() { return this._inner.seat; }
   set seat(v) { this._inner.seat = v; }
   startPlay(c) { return this._inner.startPlay(c); }
   finishPlay(c) { return this._inner.finishPlay(c); }
-  async play(c, hand, dummy) { await sleep(1100); return this._inner.play(c, hand, dummy); }
-  async playFromDummy(c, dummy, hand) { await sleep(1100); return this._inner.playFromDummy(c, dummy, hand); }
+  async play(c, hand, dummy) { await waitWhilePaused(this._getPaused); await sleep(1100); await waitWhilePaused(this._getPaused); return this._inner.play(c, hand, dummy); }
+  async playFromDummy(c, dummy, hand) { await waitWhilePaused(this._getPaused); await sleep(1100); await waitWhilePaused(this._getPaused); return this._inner.playFromDummy(c, dummy, hand); }
+}
+// Robot bidding is instant, so a paused hand would otherwise bid on
+// while the user is away. Make the bidder wait while paused, too.
+class PausingBidder {
+  constructor(inner, getPaused) { this._inner = inner; this._getPaused = getPaused; }
+  get seat() { return this._inner.seat; }
+  set seat(v) { this._inner.seat = v; }
+  get conventionCard() { return this._inner.conventionCard; }
+  acceptConventions(c) { return this._inner.acceptConventions(c); }
+  async startBoard() {}
+  async bid(board, hand) { await waitWhilePaused(this._getPaused); await waitWhilePaused(this._getPaused); return this._inner.bid(board, hand); }
 }
 
 // ------------------------------------------------------- replay player ---
@@ -255,6 +269,7 @@ function serialize(session) {
     declarerTricks: board.declarerTricks,
     defenseTricks: board.defenseTricks,
     pending: pendingInfo,
+    paused: !!session.paused,
     error: session.error || null,
     result: board.status === 'complete' && contract ? {
       declarerTricks: board.declarerTricks,
@@ -269,21 +284,26 @@ function serialize(session) {
 
 // ------------------------------------------------------------- sessions ---
 const sessions = new Map();
+function setPaused(session, paused) { if (session) session.paused = !!paused; }
+function makeRobot(getPaused) {
+  return new BridgePlayer(new PausingBidder(new BbsBidder(), getPaused), new SlowCardPlayer(new BasicCardPlayer(), getPaused));
+}
 function newSession() {
   const id = crypto.randomBytes(8).toString('hex');
-  const session = { id, pending: null, error: null, board: null, table: null };
+  const session = { id, pending: null, error: null, board: null, table: null, paused: false };
+  const getPaused = () => session.paused;
   const human = new HumanPlayer(session);
   const table = new BridgeTable({ assignContract: false });
   // assignTeam, not assignPlayer: assignPlayer rejects a player whose
   // conventions do not match its partner's, and the human base player
   // carries approach 'none' while the bot bidder carries 'bbs'.
   table.assignTeam('NS', [
-    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
+    makeRobot(getPaused),
     human,
   ]);
   table.assignTeam('EW', [
-    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
-    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
+    makeRobot(getPaused),
+    makeRobot(getPaused),
   ]);
   session.table = table;
   session.human = human;
@@ -313,10 +333,11 @@ function getSession(id) { return sessions.get(id) || null; }
 async function restoreSession(snap) {
   try {
     if (!snap || !snap.id || !snap.hands || !snap.dealer || !snap.vulnerability) return null;
-    const session = { id: snap.id, pending: null, error: null, board: null, table: null, lastSavedJson: JSON.stringify(snap) };
+    const session = { id: snap.id, pending: null, error: null, board: null, table: null, paused: false, lastSavedJson: JSON.stringify(snap) };
+    const getPaused = () => session.paused;
     const human = new HumanPlayer(session);
     const replay = { bids: snap.bids || [], bidIndex: 0, plays: snap.plays || [], playIndex: 0 };
-    const robot = () => new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer()));
+    const robot = () => makeRobot(getPaused);
     const table = new BridgeTable({ assignContract: false });
     table.assignTeam('NS', [
       new ReplayPlayer(robot(), replay),
@@ -381,4 +402,4 @@ function submitPlay(session, cardIdValue) {
   pending.resolve(card);
 }
 
-module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, restoreSession, setSaveFn, snapshot, SEAT_NAMES };
+module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, restoreSession, setSaveFn, snapshot, setPaused, SEAT_NAMES };
