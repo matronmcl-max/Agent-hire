@@ -76,7 +76,9 @@
           ? 'Your turn — play one of North’s cards (you are the declarer).'
           : 'Your turn to play a card.';
       } else {
-        statusEl.textContent = 'The robots are playing…';
+        statusEl.textContent = (state.contract && state.contract.dummySeat === 'S')
+          ? 'You are dummy this hand — the robots play your cards. Watch the table.'
+          : 'The robots are playing…';
       }
     } else if (state.status === 'complete') {
       statusEl.textContent = state.passedOut ? 'Everyone passed — no hand played.' : 'Hand finished.';

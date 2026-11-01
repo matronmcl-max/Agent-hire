@@ -41,6 +41,20 @@ class HumanPlayer extends BridgePlayerBase {
   }
 }
 
+// Bots answer instantly, so a hand where you are dummy (or between your
+// turns) used to race to the finish before you could see a single trick.
+// Slow every robot card play down so the table is actually watchable.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+class SlowCardPlayer {
+  constructor(inner) { this._inner = inner; }
+  get seat() { return this._inner.seat; }
+  set seat(v) { this._inner.seat = v; }
+  startPlay(c) { return this._inner.startPlay(c); }
+  finishPlay(c) { return this._inner.finishPlay(c); }
+  async play(c, hand, dummy) { await sleep(1100); return this._inner.play(c, hand, dummy); }
+  async playFromDummy(c, dummy, hand) { await sleep(1100); return this._inner.playFromDummy(c, dummy, hand); }
+}
+
 // -------------------------------------------------------------- helpers ---
 const SEATS = ['N', 'E', 'S', 'W'];
 const SEAT_NAMES = { N: 'North', E: 'East', S: 'South', W: 'West' };
@@ -179,12 +193,12 @@ function newSession() {
   // conventions do not match its partner's, and the human base player
   // carries approach 'none' while the bot bidder carries 'bbs'.
   table.assignTeam('NS', [
-    new BridgePlayer(new BbsBidder(), new BasicCardPlayer()),
+    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
     human,
   ]);
   table.assignTeam('EW', [
-    new BridgePlayer(new BbsBidder(), new BasicCardPlayer()),
-    new BridgePlayer(new BbsBidder(), new BasicCardPlayer()),
+    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
+    new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer())),
   ]);
   session.table = table;
   session.human = human;
