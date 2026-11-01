@@ -25,9 +25,10 @@
     // Bids arrive in seat order; lay them out in rounds of four starting
     // at the first bidder's column.
     var order = ['N', 'E', 'S', 'W'];
-    var start = state.bids.length ? order.indexOf(state.bids[0].by) : 0;
+    var bids = state.bids || [];
+    var start = bids.length ? order.indexOf(bids[0].by) : 0;
     var row = null, col = start;
-    state.bids.forEach(function (bid) {
+    bids.forEach(function (bid) {
       if (!row || col === 0 && row) { row = document.createElement('tr'); body.appendChild(row); }
       // Fill any skipped columns (should not happen, but keeps the grid true).
       while (row.children.length < col) { row.appendChild(document.createElement('td')); }
@@ -38,14 +39,30 @@
       col = (col + 1) % 4;
       if (col === 0) row = null;
     });
-    show($('auction-box'), state.bids.length > 0);
+    show($('auction-box'), bids.length > 0);
   }
 
   function render(state) {
     lastState = state;
     errorEl.textContent = state.error || '';
-    metaEl.textContent = 'Dealer: ' + state.dealerName + '  •  Vulnerable: ' +
-      (state.vulnerability === 'none' ? 'Nobody' : state.vulnerability === 'both' ? 'Both teams' : state.vulnerability) +
+    // A dead session (e.g. the site was redeployed and in-memory hands
+    // were lost) must not leave stale bid buttons on screen. Hide the
+    // game boxes and offer a fresh hand instead of freezing.
+    if (state.error) {
+      statusEl.textContent = 'That hand is gone — deal a new one.';
+      metaEl.textContent = '';
+      show($('auction-box'), false);
+      show($('bid-box'), false);
+      show($('contract-box'), false);
+      show($('trick-box'), false);
+      show($('dummy-box'), false);
+      show($('play-box'), false);
+      show($('result-box'), true);
+      $('result-text').textContent = 'The site was updated while you were playing, so that hand was lost. Tap below for a fresh hand.';
+      return;
+    }
+    metaEl.textContent = 'Dealer: ' + (state.dealerName || '—') + '  •  Vulnerable: ' +
+      (state.vulnerability === 'none' ? 'Nobody' : state.vulnerability === 'both' ? 'Both teams' : (state.vulnerability || '—')) +
       '  •  Your team: North + South';
     renderAuction(state);
 
