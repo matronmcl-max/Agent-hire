@@ -1,21 +1,35 @@
-// Bridge prototype game state — server side, in memory only.
+// Bridge game state — hands are PERSISTED, not just in memory.
 // Uses bridge-engine (MIT, Kingston Duffie, 2022) via dist/lib — NOT the
 // package main entry, which runs the author's 24-board sample on require.
 // No database, no money, no job/MCP routes touched. One hand at a time per
-// session; a server restart ends any hand in progress (prototype limit).
+// session.
 //
 // How it works: BridgeTable.playBoard() runs in the background for a session
 // and pauses whenever it asks the human player to bid or play, because the
 // human player's bid()/play() return promises that only resolve when the
 // browser posts that bid/card. Bots (BbsBidder + BasicCardPlayer) answer at
 // once, so the loop races on to the next human turn on its own.
+//
+// Persistence: after every state change, serialize() snapshots the hand
+// (original deal + bids + plays in order) and hands it to a save function
+// supplied by server.js (Turso live, local SQLite locally). On a server
+// restart, restoreSession() rebuilds the same deal and replays the recorded
+// bids/plays through a fresh playBoard() loop, then hands control back to
+// the human/robot players at exactly the point the hand stopped. A restart
+// therefore resumes the hand instead of wiping it.
 
 const crypto = require('crypto');
 const {
-  BridgeTable, BridgePlayer, BridgePlayerBase,
-  Bid, BidWithSeat,
+  BridgeTable, BridgePlayer, BridgePlayerBase, Board, Hand,
+  Bid, BidWithSeat, RandomGeneratorImpl,
   getPartnerBySeat, getSeatFollowing,
 } = require('bridge-engine/dist/lib');
+const { Card } = require('bridge-engine/dist/card');
+
+// Save function supplied by server.js: saveSnapshot(snapshot) => Promise.
+// Null when no persistence is wired (tests that do not need it).
+let saveFn = null;
+function setSaveFn(fn) { saveFn = fn; }
 // The robot bidder/player are NOT re-exported from dist/lib — they live
 // in dist/robots/ and must be imported directly.
 const { BbsBidder } = require('bridge-engine/dist/robots/bbs-bidder');
@@ -53,6 +67,48 @@ class SlowCardPlayer {
   finishPlay(c) { return this._inner.finishPlay(c); }
   async play(c, hand, dummy) { await sleep(1100); return this._inner.play(c, hand, dummy); }
   async playFromDummy(c, dummy, hand) { await sleep(1100); return this._inner.playFromDummy(c, dummy, hand); }
+}
+
+// ------------------------------------------------------- replay player ---
+// Used only when restoring a persisted hand. It replays recorded bids and
+// plays in order, instantly, and once the recording runs out it delegates
+// to the real player (human for South, slow robot for the other seats).
+// That is what makes a restored hand continue exactly where it stopped.
+class ReplayPlayer {
+  constructor(inner, replay) { this._inner = inner; this._replay = replay; this._seat = 'N'; }
+  get seat() { return this._seat; }
+  set seat(v) { this._seat = v; if (this._inner) this._inner.seat = v; }
+  get conventionCard() { return this._inner ? this._inner.conventionCard : null; }
+  acceptConventions(c) { return this._inner ? this._inner.acceptConventions(c) : true; }
+  async startBoard() {}
+  async startPlay() {}
+  async finishPlay() {}
+  async bid(board, hand) {
+    const r = this._replay;
+    if (r.bidIndex < r.bids.length && r.bids[r.bidIndex].by === this._seat) {
+      const b = r.bids[r.bidIndex++];
+      return new Bid(b.type, b.type === 'normal' ? b.count : undefined, b.type === 'normal' ? b.strain : undefined);
+    }
+    return this._inner.bid(board, hand);
+  }
+  async play(board, hand, dummy) {
+    const r = this._replay;
+    if (r.playIndex < r.plays.length && r.plays[r.playIndex].by === this._seat) {
+      const p = r.plays[r.playIndex++];
+      const card = findCard(hand, p.card);
+      if (card) return card;
+    }
+    return this._inner.play(board, hand, dummy);
+  }
+  async playFromDummy(board, dummy, hand) {
+    const r = this._replay;
+    if (r.playIndex < r.plays.length) {
+      const p = r.plays[r.playIndex++];
+      const card = findCard(dummy, p.card);
+      if (card) return card;
+    }
+    return this._inner.playFromDummy(board, dummy, hand);
+  }
 }
 
 // -------------------------------------------------------------- helpers ---
@@ -110,9 +166,38 @@ function legalBids(board) {
   return out;
 }
 
+// Snapshot: everything needed to rebuild this hand from scratch.
+// Original deal = allCards (not unplayed, which shrinks as cards go out).
+function snapshot(session) {
+  const board = session.board;
+  if (!board) return null;
+  const plays = [];
+  for (const t of board.tricks) for (const p of t.plays) plays.push({ by: p.by, card: cardId(p.card) });
+  const hands = {};
+  for (const s of SEATS) hands[s] = board.getHand(s).allCards.cards.map((c) => cardId(c));
+  return {
+    id: session.id,
+    dealer: board.dealer,
+    vulnerability: board.vulnerability,
+    hands,
+    bids: board.bids.map((b) => ({ by: b.by, type: b.type, count: b.type === 'normal' ? b.count : null, strain: b.type === 'normal' ? b.strain : null })),
+    plays,
+  };
+}
+
 function serialize(session) {
   const board = session.board;
   if (!board) return { status: 'waiting', session: session.id };
+  // Persist on change: every poll that sees a new bid/play saves it, so
+  // a restart never loses more than the very latest move in flight.
+  if (saveFn) {
+    const snap = snapshot(session);
+    const snapJson = JSON.stringify(snap);
+    if (snap && snapJson !== session.lastSavedJson) {
+      session.lastSavedJson = snapJson;
+      Promise.resolve().then(() => saveFn(snap)).catch(() => { session.lastSavedJson = null; });
+    }
+  }
   const contract = board.contract;
   const tricks = board.tricks || [];
   const currentTrick = tricks.length ? tricks[tricks.length - 1] : null;
@@ -223,6 +308,58 @@ async function startSession(session) {
 
 function getSession(id) { return sessions.get(id) || null; }
 
+// Rebuild a hand from a snapshot and replay it to the saved point.
+// Returns the session, or null if the snapshot is unusable.
+async function restoreSession(snap) {
+  try {
+    if (!snap || !snap.id || !snap.hands || !snap.dealer || !snap.vulnerability) return null;
+    const session = { id: snap.id, pending: null, error: null, board: null, table: null, lastSavedJson: JSON.stringify(snap) };
+    const human = new HumanPlayer(session);
+    const replay = { bids: snap.bids || [], bidIndex: 0, plays: snap.plays || [], playIndex: 0 };
+    const robot = () => new BridgePlayer(new BbsBidder(), new SlowCardPlayer(new BasicCardPlayer()));
+    const table = new BridgeTable({ assignContract: false });
+    table.assignTeam('NS', [
+      new ReplayPlayer(robot(), replay),
+      new ReplayPlayer(human, replay),
+    ]);
+    table.assignTeam('EW', [
+      new ReplayPlayer(robot(), replay),
+      new ReplayPlayer(robot(), replay),
+    ]);
+    session.table = table;
+    session.human = human;
+    // Rebuild the original deal, then let startBoard copy it into a
+    // fresh board (status 'created', no bids/plays yet) for replay.
+    const hands = new Map();
+    for (const s of SEATS) {
+      const hand = new Hand();
+      for (const cid of snap.hands[s]) {
+        const rank = cid.slice(0, -1), suit = cid.slice(-1);
+        hand.dealCard(new Card(rank, suit));
+      }
+      hands.set(s, hand);
+    }
+    const seedBoard = new Board(snap.id, snap.vulnerability, snap.dealer, hands, new RandomGeneratorImpl());
+    const board = await table.startBoard(seedBoard);
+    session.board = board;
+    sessions.set(session.id, session);
+    if (sessions.size > 20) {
+      const oldest = sessions.keys().next().value;
+      if (oldest !== session.id) sessions.delete(oldest);
+    }
+    // Replay in the background; it pauses at the first un-recorded human
+    // turn, exactly where the original hand stopped.
+    table.playBoard().catch((e) => {
+      session.error = e && e.message ? e.message : String(e);
+      session.pending = null;
+    });
+    return session;
+  } catch (e) {
+    console.error('bridge restore failed', e);
+    return null;
+  }
+}
+
 function submitBid(session, bidIdValue) {
   const pending = session.pending;
   if (!pending || pending.kind !== 'bid') throw new Error('It is not your turn to bid right now.');
@@ -244,4 +381,4 @@ function submitPlay(session, cardIdValue) {
   pending.resolve(card);
 }
 
-module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, SEAT_NAMES };
+module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, restoreSession, setSaveFn, snapshot, SEAT_NAMES };

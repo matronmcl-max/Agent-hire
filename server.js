@@ -157,6 +157,11 @@ const SCHEMA = [
     user_agent TEXT DEFAULT '',
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS bridge_hands (
+    id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
 ];
 
 async function initSchema() {
@@ -533,9 +538,33 @@ app.get('/snow-removal-spokane', (req, res) => res.sendFile(path.join(__dirname,
 app.get('/house-cleaning-spokane', (req, res) => res.sendFile(path.join(__dirname, 'house-cleaning-spokane.html')));
 app.get('/pet-sitting-dog-walking-spokane', (req, res) => res.sendFile(path.join(__dirname, 'pet-sitting-dog-walking-spokane.html')));
 
-// Bridge prototype (local first version): solo game, you as South + 3 bots.
-// In-memory only, no database, no money. Engine: bridge-engine (MIT).
+// Bridge solo game, you as South + 3 bots. Engine: bridge-engine (MIT).
+// Hands are persisted to the database (Turso live): a server restart
+// restores the hand by replaying its recorded bids/plays, instead of
+// wiping it. No money, no job routes touched.
 const bridgeGame = require('./bridge-game');
+bridgeGame.setSaveFn(async (snap) => {
+  try {
+    await dbRun(
+      `INSERT INTO bridge_hands (id, state, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+      [snap.id, JSON.stringify(snap), new Date().toISOString()]
+    );
+  } catch (e) { console.error('bridge save failed', e && e.message); }
+});
+async function getOrRestoreBridgeSession(id) {
+  let session = bridgeGame.getSession(id);
+  if (session) return session;
+  try {
+    const row = await dbGet('SELECT state FROM bridge_hands WHERE id = ?', [id]);
+    if (!row) return null;
+    const snap = JSON.parse(row.state);
+    session = await bridgeGame.restoreSession(snap);
+    // Give replay a tick to reach the saved point before serializing.
+    await new Promise((r) => setTimeout(r, 100));
+    return session;
+  } catch (e) { console.error('bridge restore failed', e && e.message); return null; }
+}
 app.get('/bridge', (req, res) => res.sendFile(path.join(__dirname, 'bridge.html')));
 app.get('/bridge.js', (req, res) => res.sendFile(path.join(__dirname, 'bridge.js')));
 app.post('/v1/bridge/new', async (req, res, next) => {
@@ -547,19 +576,19 @@ app.post('/v1/bridge/new', async (req, res, next) => {
     res.json(bridgeGame.serialize(session));
   } catch (e) { next(e); }
 });
-app.get('/v1/bridge/state', (req, res) => {
-  const session = bridgeGame.getSession(req.query.session);
+app.get('/v1/bridge/state', async (req, res) => {
+  const session = await getOrRestoreBridgeSession(req.query.session);
   if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
   res.json(bridgeGame.serialize(session));
 });
-app.post('/v1/bridge/bid', (req, res) => {
-  const session = bridgeGame.getSession(req.body.session);
+app.post('/v1/bridge/bid', async (req, res) => {
+  const session = await getOrRestoreBridgeSession(req.body.session);
   if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
   try { bridgeGame.submitBid(session, req.body.bid); } catch (e) { return res.status(400).json({ error: e.message }); }
   res.json(bridgeGame.serialize(session));
 });
-app.post('/v1/bridge/play', (req, res) => {
-  const session = bridgeGame.getSession(req.body.session);
+app.post('/v1/bridge/play', async (req, res) => {
+  const session = await getOrRestoreBridgeSession(req.body.session);
   if (!session) return res.status(404).json({ error: 'No such bridge game. Deal a new hand.' });
   try { bridgeGame.submitPlay(session, req.body.card); } catch (e) { return res.status(400).json({ error: e.message }); }
   res.json(bridgeGame.serialize(session));
