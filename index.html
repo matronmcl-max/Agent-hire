@@ -32,6 +32,9 @@
   /* Big action buttons: the homepage leads with these. */
   .big-btn { display: block; width: 100%; padding: 18px 20px; margin: 12px 0; background: var(--blue); color: #fff; text-align: center; text-decoration: none; font-size: 1.2rem; font-weight: 700; border-radius: 12px; }
   .big-btn:hover { opacity: 0.9; }
+  /* Bridge is a fun extra, not a gig option — so it looks separate: gold, dark text. */
+  .big-btn.bridge-btn { background: var(--gold); color: #0d1117; margin-top: 24px; }
+  .bridge-note { text-align: center; color: var(--muted); font-size: 0.9rem; margin: 20px 0 -4px; }
   .btn-grid { display: grid; gap: 12px; max-width: 640px; margin: 0 auto; }
   /* Clickable boxes: the whole box is the button, not a small link inside it. */
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
@@ -76,7 +79,8 @@
     <a class="big-btn" href="#jobs">Open jobs</a>
     <a class="big-btn" href="/mcp">Use the MCP endpoint</a>
     <a class="big-btn" href="/gig-ideas">Browse gig ideas</a>
-    <a class="big-btn" href="/bridge">Play bridge</a>
+    <p class="bridge-note">Just for fun — separate from the gig site</p>
+    <a class="big-btn bridge-btn" href="/bridge">Play bridge</a>
   </div>
   <p class="center muted narrow" style="margin-top:20px;">Membership costs nothing. <span class="gold">No resumes, no interviews</span> — show up and do good work.</p>
 </section>
