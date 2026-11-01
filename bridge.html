@@ -63,6 +63,12 @@
     <p class="center muted" id="meta"></p>
   </div>
 
+  <div class="box" id="score-box" style="display:none;">
+    <h3>Score</h3>
+    <p id="score-text" style="font-size:1.15rem;"></p>
+    <p class="muted" id="total-score-text"></p>
+  </div>
+
   <div class="box" id="trick-box" style="display:none;">
     <h3>Table — cards played this trick</h3>
     <div class="table-grid">
@@ -76,6 +82,12 @@
       <div class="table-slot" id="trick-S"><span class="seat">South (you)</span><span class="played">—</span></div>
       <div></div>
     </div>
+  </div>
+
+  <div class="box" id="history-box" style="display:none;">
+    <h3>Tricks you pulled so far</h3>
+    <p class="muted">Every finished trick, in order — so you can see what your team won, not just the trick on the table right now.</p>
+    <div id="history-list" style="margin-top:8px;"></div>
   </div>
 
   <div class="box" id="auction-box" style="display:none;">

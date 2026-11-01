@@ -4,6 +4,12 @@
 (function () {
   var session = null;
   var lastState = null;
+  // Running score across hands, kept in this browser so it survives
+  // a new hand (and a page reload). Counted once per hand, on finish.
+  var total = { hands: 0, yourWins: 0, score: 0 };
+  try { var saved = JSON.parse(localStorage.getItem('bridgeTotal') || 'null'); if (saved) total = saved; } catch (e) {}
+  var countedSession = null;
+  var seatNames = { N: 'North', E: 'East', S: 'South (you)', W: 'West' };
   var $ = function (id) { return document.getElementById(id); };
   var statusEl = $('status'), errorEl = $('error'), metaEl = $('meta');
 
@@ -55,6 +61,8 @@
       show($('bid-box'), false);
       show($('contract-box'), false);
       show($('trick-box'), false);
+      show($('score-box'), false);
+      show($('history-box'), false);
       show($('dummy-box'), false);
       show($('play-box'), false);
       show($('result-box'), true);
@@ -106,6 +114,45 @@
         btn.disabled = !legal[b.id];
         if (legal[b.id]) btn.addEventListener('click', function () { sendBid(b.id); });
         grid.appendChild(btn);
+      });
+    }
+
+    // Scoreboard: tricks this hand, plus the running total across hands.
+    var isNS = state.contract && (state.contract.declarer === 'N' || state.contract.declarer === 'S');
+    var yourTricks = state.contract ? (isNS ? state.declarerTricks : state.defenseTricks) : 0;
+    var theirTricks = state.contract ? (isNS ? state.defenseTricks : state.declarerTricks) : 0;
+    if (state.status === 'complete' && state.result && !state.passedOut && countedSession !== state.session) {
+      countedSession = state.session;
+      total.hands += 1;
+      if (state.result.yourTeamScore > 0) total.yourWins += 1;
+      total.score += state.result.yourTeamScore;
+      try { localStorage.setItem('bridgeTotal', JSON.stringify(total)); } catch (e) {}
+    }
+    show($('score-box'), !!state.contract);
+    if (state.contract) {
+      $('score-text').textContent = 'This hand — your team: ' + yourTricks + ' tricks • other team: ' + theirTricks + ' tricks';
+      $('total-score-text').textContent = 'Running total — ' + total.hands + ' hand' + (total.hands === 1 ? '' : 's') +
+        ', your team won ' + total.yourWins + ', total score ' + (total.score >= 0 ? '+' : '') + total.score +
+        (total.hands === 0 ? ' (finish a hand and it starts counting)' : '');
+    }
+
+    // Trick history: every finished trick, so a won trick does not vanish
+    // the moment the next trick starts.
+    var hist = state.completedTricks || [];
+    show($('history-box'), hist.length > 0);
+    if (hist.length > 0) {
+      var hl = $('history-list');
+      hl.innerHTML = '';
+      hist.forEach(function (t, i) {
+        var bySeat = {};
+        t.plays.forEach(function (p) { bySeat[p.by] = p.text; });
+        var wonByYou = t.winner === 'N' || t.winner === 'S';
+        var line = document.createElement('p');
+        line.textContent = 'Trick ' + (i + 1) + ': North ' + (bySeat.N || '—') + ' • East ' + (bySeat.E || '—') +
+          ' • South ' + (bySeat.S || '—') + ' • West ' + (bySeat.W || '—') +
+          ' → won by ' + (seatNames[t.winner] || t.winner) + (wonByYou ? ' — your team pulled this one.' : '');
+        if (wonByYou) line.style.fontWeight = '700';
+        hl.appendChild(line);
       });
     }
 
@@ -187,7 +234,9 @@
         var madeWord = r.made ? 'made' : 'went down';
         $('result-text').innerHTML = 'Contract ' + state.contract.text + ' by ' + state.contract.declarerName +
           ' ' + madeWord + ': ' + r.declarerTricks + ' tricks won, ' + r.tricksNeeded + ' needed.' +
+          '<br>Your team pulled ' + (isNS ? r.declarerTricks : state.defenseTricks) + ' tricks this hand.' +
           '<br>Your team’s score for this hand: <strong>' + (r.yourTeamScore >= 0 ? '+' : '') + r.yourTeamScore + '</strong>.' +
+          '<br>Running total: <strong>' + (total.score >= 0 ? '+' : '') + total.score + '</strong> after ' + total.hands + ' hand' + (total.hands === 1 ? '' : 's') + '.' +
           (r.yourTeamScore < 0 ? '<br><span class="red">The other team won this hand.</span>' : '');
       }
     }
