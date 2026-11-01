@@ -268,9 +268,28 @@
     show($('result-box'), false);
     fetch('/v1/bridge/new', { method: 'POST' })
       .then(function (res) { return res.json(); })
-      .then(function (data) { session = data.session; poll(); });
+      .then(function (data) { session = data.session; try { localStorage.setItem('bridgeSession', session); } catch (e) {} poll(); });
+  }
+
+  // No move timer: a turn never expires on the server. And reloading
+  // the page must not throw a hand away — resume the hand you were
+  // on, and only deal a fresh one if that hand is really gone.
+  function resumeOrNew() {
+    var savedSession = null;
+    try { savedSession = localStorage.getItem('bridgeSession'); } catch (e) {}
+    if (!savedSession) { newHand(); return; }
+    statusEl.textContent = 'Picking up your hand…';
+    fetch('/v1/bridge/state?session=' + encodeURIComponent(savedSession))
+      .then(function (res) { return res.json(); })
+      .then(function (state) {
+        if (state.error) { newHand(); return; }
+        session = savedSession;
+        render(state);
+        if (state.status !== 'complete') poll();
+      })
+      .catch(function () { newHand(); });
   }
 
   $('new-hand').addEventListener('click', newHand);
-  newHand();
+  resumeOrNew();
 })();
