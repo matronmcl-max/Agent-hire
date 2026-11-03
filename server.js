@@ -162,6 +162,29 @@ const SCHEMA = [
     state TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS seeking (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    rate TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    contact TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS trade_posts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'sell',
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    price TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    contact TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+  )`,
 ];
 
 async function initSchema() {
@@ -243,6 +266,86 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
     // it is ever returned.
     const { contact: _contact, ...jobOut } = job;
     res.status(201).json({ ...jobOut, escrowed: total });
+  } catch (e) { next(e); }
+});
+
+// Seeking-work board: the reverse of the jobs board — a person posts
+// the work they do and want to be hired for. Same contact rule as
+// jobs: the public list never includes contact; it is returned only
+// when someone asks for that post's contact (one tap on the page).
+app.post('/v1/seeking', async (req, res, next) => {
+  try {
+    const { name, title, description = '', rate = '', location = '', contact = '' } = req.body || {};
+    if (!name || !title || !contact) {
+      return res.status(400).json({ error: 'name, title and contact are required' });
+    }
+    const post = { id: uid('seek'), name: String(name).trim().slice(0, 80),
+                   title: String(title).trim().slice(0, 120),
+                   description: String(description).trim().slice(0, 500),
+                   rate: String(rate).trim().slice(0, 60),
+                   location: String(location).trim().slice(0, 120),
+                   contact: String(contact).trim().slice(0, 120),
+                   status: 'open', created_at: now() };
+    await dbRun(`INSERT INTO seeking (id, name, title, description, rate, location, contact, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+      [post.id, post.name, post.title, post.description, post.rate, post.location, post.contact, post.created_at]);
+    const { contact: _contact, ...postOut } = post;
+    res.status(201).json(postOut);
+  } catch (e) { next(e); }
+});
+app.get('/v1/seeking', async (req, res, next) => {
+  try {
+    const posts = await dbAll(`SELECT id, name, title, description, rate, location, status, created_at
+                               FROM seeking WHERE status = 'open' ORDER BY created_at DESC`);
+    res.json({ seeking: posts });
+  } catch (e) { next(e); }
+});
+app.post('/v1/seeking/:id/contact', async (req, res, next) => {
+  try {
+    const post = await dbGet('SELECT * FROM seeking WHERE id = ?', [req.params.id]);
+    if (!post) return res.status(404).json({ error: 'Seeking post not found' });
+    if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
+    res.json({ id: post.id, name: post.name, contact: post.contact });
+  } catch (e) { next(e); }
+});
+
+// Buy & sell board: same shape as seeking work — a person posts an
+// item to sell, or an item they want to buy. Public list never
+// includes contact; it is returned only when someone asks for it.
+app.post('/v1/trade', async (req, res, next) => {
+  try {
+    const { name, kind = 'sell', title, description = '', price = '', location = '', contact = '' } = req.body || {};
+    if (!name || !title || !contact) {
+      return res.status(400).json({ error: 'name, title and contact are required' });
+    }
+    const post = { id: uid('trd'), name: String(name).trim().slice(0, 80),
+                   kind: kind === 'buy' ? 'buy' : 'sell',
+                   title: String(title).trim().slice(0, 120),
+                   description: String(description).trim().slice(0, 500),
+                   price: String(price).trim().slice(0, 60),
+                   location: String(location).trim().slice(0, 120),
+                   contact: String(contact).trim().slice(0, 120),
+                   status: 'open', created_at: now() };
+    await dbRun(`INSERT INTO trade_posts (id, name, kind, title, description, price, location, contact, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+      [post.id, post.name, post.kind, post.title, post.description, post.price, post.location, post.contact, post.created_at]);
+    const { contact: _contact, ...postOut } = post;
+    res.status(201).json(postOut);
+  } catch (e) { next(e); }
+});
+app.get('/v1/trade', async (req, res, next) => {
+  try {
+    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, status, created_at
+                               FROM trade_posts WHERE status = 'open' ORDER BY created_at DESC`);
+    res.json({ trade: posts });
+  } catch (e) { next(e); }
+});
+app.post('/v1/trade/:id/contact', async (req, res, next) => {
+  try {
+    const post = await dbGet('SELECT * FROM trade_posts WHERE id = ?', [req.params.id]);
+    if (!post) return res.status(404).json({ error: 'Buy/sell post not found' });
+    if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
+    res.json({ id: post.id, name: post.name, contact: post.contact });
   } catch (e) { next(e); }
 });
 

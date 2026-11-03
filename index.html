@@ -77,6 +77,8 @@
     <a class="big-btn" href="#join">Join the club</a>
     <a class="big-btn" href="#buyers">Post a job</a>
     <a class="big-btn" href="#jobs">Open jobs</a>
+    <a class="big-btn" href="#seeking">Seeking work</a>
+    <a class="big-btn" href="#trade">Buy &amp; sell</a>
     <a class="big-btn" href="/mcp">Use the MCP endpoint</a>
     <a class="big-btn" href="/gig-ideas">Browse gig ideas</a>
     <p class="bridge-note">Just for fun — separate from the gig site</p>
@@ -97,6 +99,72 @@
     <p class="center muted">Loading open jobs…</p>
   </div>
   <p class="center" style="margin-top:24px;"><a href="/proof">See completed jobs and the <span class="red">7% fee</span>, out in the open →</a></p>
+</section>
+
+<section id="seeking">
+  <h2>Looking for work?</h2>
+  <p class="center muted narrow" style="margin-bottom:24px;">Post the work you do, so someone who needs it can find you. Your contact details are not shown on the public list — someone taps to ask for them, then they can reach you.</p>
+  <div id="seeking-list" class="grid narrow">
+    <p class="center muted">Loading people seeking work…</p>
+  </div>
+  <form class="join" id="seeking-form" style="margin-top:24px;">
+    <label>Your name
+      <input type="text" id="seeking-name" required maxlength="80" placeholder="What should we call you?">
+    </label>
+    <label>What work do you do?
+      <input type="text" id="seeking-title" required maxlength="120" placeholder="e.g. Leaf raking, snow shoveling, cooking">
+    </label>
+    <label>A bit more about it
+      <input type="text" id="seeking-desc" maxlength="500" placeholder="What you offer, when you're available">
+    </label>
+    <label>Your rate <span class="muted">(optional)</span>
+      <input type="text" id="seeking-rate" maxlength="60" placeholder="e.g. $15 an hour">
+    </label>
+    <label>Area <span class="muted">(optional)</span>
+      <input type="text" id="seeking-location" maxlength="120" placeholder="e.g. Spokane">
+    </label>
+    <label>How do we reach you? <span class="muted">(phone or email — only shared when someone asks for your post)</span>
+      <input type="text" id="seeking-contact" required maxlength="120" placeholder="Phone or email">
+    </label>
+    <button type="submit">Post that I'm seeking work</button>
+    <div id="seeking-msg"></div>
+  </form>
+</section>
+
+<section id="trade">
+  <h2>Buy &amp; sell</h2>
+  <p class="center muted narrow" style="margin-bottom:24px;">Post something you want to sell, or something you want to buy. Your contact details are not shown on the public list — someone taps to ask for them, then they can reach you.</p>
+  <div id="trade-list" class="grid narrow">
+    <p class="center muted">Loading buy &amp; sell posts…</p>
+  </div>
+  <form class="join" id="trade-form" style="margin-top:24px;">
+    <label>Your name
+      <input type="text" id="trade-name" required maxlength="80" placeholder="What should we call you?">
+    </label>
+    <label>Buying or selling?
+      <select id="trade-kind" style="width:100%;padding:12px;border-radius:10px;">
+        <option value="sell">Selling</option>
+        <option value="buy">Buying / wanted</option>
+      </select>
+    </label>
+    <label>Item
+      <input type="text" id="trade-title" required maxlength="120" placeholder="e.g. Large black wire dog crate">
+    </label>
+    <label>About it
+      <input type="text" id="trade-desc" maxlength="500" placeholder="Condition, size, what's included">
+    </label>
+    <label>Price <span class="muted">(optional — or what you'll pay, if buying)</span>
+      <input type="text" id="trade-price" maxlength="60" placeholder="e.g. $15">
+    </label>
+    <label>Area <span class="muted">(optional)</span>
+      <input type="text" id="trade-location" maxlength="120" placeholder="e.g. Spokane">
+    </label>
+    <label>How do we reach you? <span class="muted">(phone or email — only shared when someone asks for your post)</span>
+      <input type="text" id="trade-contact" required maxlength="120" placeholder="Phone or email">
+    </label>
+    <button type="submit">Post it for buy &amp; sell</button>
+    <div id="trade-msg"></div>
+  </form>
 </section>
 
 <section id="buyers">
@@ -253,6 +321,131 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
 }).catch(function () {
   var el = document.getElementById('jobs-list');
   if (el) el.innerHTML = '<p class="center muted">Could not load open jobs right now — try again in a bit.</p>';
+});
+</script>
+<script>
+// Seeking-work board — from GET /v1/seeking. Contact is never in the
+// public list; tapping a card's button asks the server for it.
+function loadSeeking() {
+  fetch('/v1/seeking').then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById('seeking-list');
+    if (!el) return;
+    var posts = (d && d.seeking) || [];
+    if (!posts.length) {
+      el.innerHTML = '<p class="center muted">Nobody has posted seeking work yet — be the first, with the form below.</p>';
+      return;
+    }
+    el.innerHTML = posts.map(function (p) {
+      var esc = function (s) { return String(s || '').replace(/</g, '&lt;'); };
+      return '<div class="card box-btn"><h3>' + esc(p.title) + '</h3>'
+        + (p.description ? '<p>' + esc(p.description) + '</p>' : '')
+        + '<p>👤 ' + esc(p.name) + (p.location ? ' • 📍 ' + esc(p.location) : '') + '</p>'
+        + (p.rate ? '<p style="margin-top:12px; color:var(--red); font-weight:600;">' + esc(p.rate) + '</p>' : '')
+        + '<p style="margin-top:12px;"><button class="big-btn" data-seek-contact="' + esc(p.id) + '">Get their contact</button></p>'
+        + '<p class="muted" id="seek-contact-' + esc(p.id) + '"></p></div>';
+    }).join('');
+    el.querySelectorAll('[data-seek-contact]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-seek-contact');
+        var out = document.getElementById('seek-contact-' + id);
+        out.textContent = 'Getting contact…';
+        fetch('/v1/seeking/' + encodeURIComponent(id) + '/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) { out.textContent = data.contact ? 'Reach them at: ' + data.contact : 'Could not get their contact right now.'; })
+          .catch(function () { out.textContent = 'Could not get their contact right now.'; });
+      });
+    });
+  }).catch(function () {
+    var el = document.getElementById('seeking-list');
+    if (el) el.innerHTML = '<p class="center muted">Could not load seeking-work posts right now — try again in a bit.</p>';
+  });
+}
+loadSeeking();
+document.getElementById('seeking-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('seeking-msg');
+  msg.textContent = 'Posting…';
+  try {
+    const body = {
+      name: document.getElementById('seeking-name').value.trim(),
+      title: document.getElementById('seeking-title').value.trim(),
+      description: document.getElementById('seeking-desc').value.trim(),
+      rate: document.getElementById('seeking-rate').value.trim(),
+      location: document.getElementById('seeking-location').value.trim(),
+      contact: document.getElementById('seeking-contact').value.trim()
+    };
+    const res = await fetch('/v1/seeking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = "You're posted! People looking for that work can now find you here.";
+    e.target.reset();
+    loadSeeking();
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+  }
+});
+</script>
+<script>
+// Buy & sell board — same contact rule as seeking work.
+function loadTrade() {
+  fetch('/v1/trade').then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById('trade-list');
+    if (!el) return;
+    var posts = (d && d.trade) || [];
+    if (!posts.length) {
+      el.innerHTML = '<p class="center muted">Nothing posted for buy &amp; sell yet — be the first, with the form below.</p>';
+      return;
+    }
+    el.innerHTML = posts.map(function (p) {
+      var esc = function (s) { return String(s || '').replace(/</g, '&lt;'); };
+      var tag = p.kind === 'buy' ? 'WANTED' : 'FOR SALE';
+      return '<div class="card box-btn"><h3>' + tag + ': ' + esc(p.title) + '</h3>'
+        + (p.description ? '<p>' + esc(p.description) + '</p>' : '')
+        + '<p>👤 ' + esc(p.name) + (p.location ? ' • 📍 ' + esc(p.location) : '') + '</p>'
+        + (p.price ? '<p style="margin-top:12px; color:var(--red); font-weight:600;">' + esc(p.price) + '</p>' : '')
+        + '<p style="margin-top:12px;"><button class="big-btn" data-trade-contact="' + esc(p.id) + '">Get their contact</button></p>'
+        + '<p class="muted" id="trade-contact-' + esc(p.id) + '"></p></div>';
+    }).join('');
+    el.querySelectorAll('[data-trade-contact]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-trade-contact');
+        var out = document.getElementById('trade-contact-' + id);
+        out.textContent = 'Getting contact…';
+        fetch('/v1/trade/' + encodeURIComponent(id) + '/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) { out.textContent = data.contact ? 'Reach them at: ' + data.contact : 'Could not get their contact right now.'; })
+          .catch(function () { out.textContent = 'Could not get their contact right now.'; });
+      });
+    });
+  }).catch(function () {
+    var el = document.getElementById('trade-list');
+    if (el) el.innerHTML = '<p class="center muted">Could not load buy &amp; sell posts right now — try again in a bit.</p>';
+  });
+}
+loadTrade();
+document.getElementById('trade-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('trade-msg');
+  msg.textContent = 'Posting…';
+  try {
+    const body = {
+      name: document.getElementById('trade-name').value.trim(),
+      kind: document.getElementById('trade-kind').value,
+      title: document.getElementById('trade-title').value.trim(),
+      description: document.getElementById('trade-desc').value.trim(),
+      price: document.getElementById('trade-price').value.trim(),
+      location: document.getElementById('trade-location').value.trim(),
+      contact: document.getElementById('trade-contact').value.trim()
+    };
+    const res = await fetch('/v1/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = "You're posted! People can now find it here.";
+    e.target.reset();
+    loadTrade();
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+  }
 });
 </script>
 <script>
