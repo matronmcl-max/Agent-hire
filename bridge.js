@@ -11,6 +11,11 @@
   var countedSession = null;
   var seatNames = { N: 'North', E: 'East', S: 'South (you)', W: 'West' };
   var manualPaused = false, autoPaused = false;
+  // $ must be defined before any listener uses it — it used to be
+  // defined below the pause-button listener, so calling it there
+  // threw and the whole script died before ever dealing a hand.
+  // That is why the page stuck on "Dealing a hand…" forever.
+  var $ = function (id) { return document.getElementById(id); };
   function sendPause(paused) {
     if (!session) return;
     fetch('/v1/bridge/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: session, paused: paused }) })
@@ -29,7 +34,6 @@
     autoPaused = false;
     sendPause(manualPaused);
   });
-  var $ = function (id) { return document.getElementById(id); };
   var statusEl = $('status'), errorEl = $('error'), metaEl = $('meta');
 
   function show(el, on) { el.style.display = on ? '' : 'none'; }
