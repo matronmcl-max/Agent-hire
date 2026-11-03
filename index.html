@@ -36,6 +36,8 @@
      so they stay readable on the blue buttons. */
   .big-btn.txt-green { color: #b5f5c0; }
   .big-btn.txt-orange { color: #ffcf99; }
+  /* Advertising in nature is red, overriding the green/orange alternation. */
+  .big-btn.txt-red { color: #ff8a80; }
   /* Bridge is a fun extra, not a gig option — so it looks separate: gold, dark text. */
   .big-btn.bridge-btn { background: var(--gold); color: #0d1117; margin-top: 24px; }
   .bridge-note { text-align: center; color: var(--muted); font-size: 0.9rem; margin: 20px 0 -4px; }
@@ -79,11 +81,11 @@
 <section style="border-top:none; padding-top:8px;">
   <div class="btn-grid">
     <a class="big-btn txt-green" href="#join">Join the club</a>
-    <a class="big-btn txt-orange" href="#buyers">Post a job</a>
+    <a class="big-btn txt-red" href="#buyers">Post a job</a>
     <a class="big-btn txt-green" href="#jobs">Open jobs</a>
     <a class="big-btn txt-orange" href="#board">Bulletin board</a>
     <a class="big-btn txt-green" href="/mcp">Use the MCP endpoint</a>
-    <a class="big-btn txt-orange" href="/gig-ideas">Browse gig ideas</a>
+    <a class="big-btn txt-red" href="/gig-ideas">Browse gig ideas</a>
     <p class="bridge-note">Just for fun — separate from the gig site</p>
     <a class="big-btn bridge-btn" href="/bridge">Play bridge</a>
   </div>
@@ -92,7 +94,7 @@
 
 <section>
   <p class="center narrow" style="font-size:1.05rem;">This is my first website. I'm hoping for a job to be posted here that I can take — that's what will get this website off the ground.</p>
-  <p class="center narrow" style="font-size:1.05rem; margin-top:12px;">Please share this site with anyone who might need work done or want work — sharing is welcome and it really helps.</p>
+  <p class="center narrow" style="font-size:1.05rem; margin-top:12px; color:var(--red);">Please share this site with anyone who might need work done or want work — sharing is welcome and it really helps.</p>
 </section>
 
 <section id="jobs">
@@ -169,7 +171,7 @@
   <blockquote style="text-align:center; font-style:italic; font-size:1.1rem; max-width:640px; margin:0 auto 20px;">"A specialist's real value is their specialized intelligence — the judgment, know-how, and ways of working that set them apart from everyone else using the same tools."</blockquote>
   <p class="center muted narrow">We're seeking the people who do this work — when someone who specializes in one of these joins as a member, that service becomes available here.</p>
   <div class="btn-grid" style="margin-top:24px;">
-    <a class="big-btn" href="/gig-ideas">Browse all gig ideas</a>
+    <a class="big-btn txt-red" href="/gig-ideas">Browse all gig ideas</a>
   </div>
 </section>
 
