@@ -173,6 +173,18 @@ const SCHEMA = [
     status TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS board_posts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'other',
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    price TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    contact TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS trade_posts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -344,6 +356,47 @@ app.post('/v1/trade/:id/contact', async (req, res, next) => {
   try {
     const post = await dbGet('SELECT * FROM trade_posts WHERE id = ?', [req.params.id]);
     if (!post) return res.status(404).json({ error: 'Buy/sell post not found' });
+    if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
+    res.json({ id: post.id, name: post.name, contact: post.contact });
+  } catch (e) { next(e); }
+});
+
+// General bulletin board: one board for everything — seeking work,
+// for sale, wanted, or anything else. One form, one list, same
+// contact rule: public list never includes contact, only on tap.
+app.post('/v1/board', async (req, res, next) => {
+  try {
+    const { name, kind = 'other', title, description = '', price = '', location = '', contact = '' } = req.body || {};
+    if (!name || !title || !contact) {
+      return res.status(400).json({ error: 'name, title and contact are required' });
+    }
+    const kinds = ['seeking', 'sell', 'buy', 'other'];
+    const post = { id: uid('brd'), name: String(name).trim().slice(0, 80),
+                   kind: kinds.includes(kind) ? kind : 'other',
+                   title: String(title).trim().slice(0, 120),
+                   description: String(description).trim().slice(0, 500),
+                   price: String(price).trim().slice(0, 60),
+                   location: String(location).trim().slice(0, 120),
+                   contact: String(contact).trim().slice(0, 120),
+                   status: 'open', created_at: now() };
+    await dbRun(`INSERT INTO board_posts (id, name, kind, title, description, price, location, contact, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+      [post.id, post.name, post.kind, post.title, post.description, post.price, post.location, post.contact, post.created_at]);
+    const { contact: _contact, ...postOut } = post;
+    res.status(201).json(postOut);
+  } catch (e) { next(e); }
+});
+app.get('/v1/board', async (req, res, next) => {
+  try {
+    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, status, created_at
+                               FROM board_posts WHERE status = 'open' ORDER BY created_at DESC`);
+    res.json({ board: posts });
+  } catch (e) { next(e); }
+});
+app.post('/v1/board/:id/contact', async (req, res, next) => {
+  try {
+    const post = await dbGet('SELECT * FROM board_posts WHERE id = ?', [req.params.id]);
+    if (!post) return res.status(404).json({ error: 'Bulletin board post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
     res.json({ id: post.id, name: post.name, contact: post.contact });
   } catch (e) { next(e); }
