@@ -148,7 +148,7 @@
   <h2>Need work done?</h2>
   <p class="center muted narrow" style="margin-bottom:24px;">Post the job. A verified club member does it. You only pay when it's done right.</p>
   <ol class="narrow muted" style="margin-bottom:24px; padding-left:20px;">
-    <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay. Your payment is held safely until the work is approved.</li>
+    <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay, or leave it open to bids and let workers name their price. Your payment is held safely until the work is approved.</li>
     <li><strong style="color:var(--fg);">A member does it</strong> — someone from the club claims it and gets it done.</li>
     <li><strong style="color:var(--fg);">You approve, they get paid</strong> — check the work. If it's right, the money releases to them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
   </ol>
@@ -272,6 +272,36 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
 // Open jobs board — TTUM's own jobs only, from GET /v1/jobs.
 // Never shows contact info: the API does not return it publicly.
 // Each job card is a whole-card button to the join form (claim by joining).
+// Bids / counter-offers: public list (name + amount only) and submit form.
+function loadBids(jobId) {
+  fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/bids').then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById('bids-' + jobId);
+    if (!el) return;
+    var bids = ((d && d.bids) || []).filter(function (b) { return b.status === 'open'; });
+    if (!bids.length) { el.textContent = 'No bids yet.'; return; }
+    el.textContent = 'Bids so far: ' + bids.map(function (b) {
+      return String(b.worker_name || '').replace(/</g, '&lt;') + ' — $' + Number(b.amount || 0);
+    }).join(' • ');
+  }).catch(function () {});
+}
+function submitBid(jobId, isOpenBid) {
+  var nameEl = document.getElementById('bid-name-' + jobId);
+  var amtEl = document.getElementById('bid-amount-' + jobId);
+  var msg = document.getElementById('bid-msg-' + jobId);
+  var name = nameEl ? nameEl.value.trim() : '';
+  var amount = amtEl ? parseInt(amtEl.value, 10) : NaN;
+  if (!name || !amount || amount <= 0) { msg.textContent = 'Add your name and a dollar amount.'; return; }
+  msg.textContent = 'Sending your bid…';
+  fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/bid', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ worker_name: name, amount: amount })
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); }).then(function (out) {
+    if (!out.ok) { msg.textContent = (out.data && out.data.error) || 'That did not go through.'; return; }
+    msg.textContent = isOpenBid ? 'Bid sent! The poster picks one.' : 'Counter-offer sent! The poster can accept or decline it.';
+    if (amtEl) amtEl.value = '';
+    loadBids(jobId);
+  }).catch(function () { msg.textContent = 'Could not send it right now — try again in a bit.'; });
+}
 fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
   var el = document.getElementById('jobs-list');
   if (!el) return;
@@ -284,11 +314,23 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
     var t = String(j.title || '').replace(/</g, '&lt;');
     var desc = String(j.description || '').replace(/</g, '&lt;');
     var loc = String(j.location || '').replace(/</g, '&lt;');
-    return '<a class="card box-btn" href="#join"><h3>' + t + '</h3>'
+    var isOpenBid = j.pricing_mode === 'open_bid';
+    var priceLine = isOpenBid
+      ? '<p style="margin-top:12px; color:var(--gold); font-weight:600;">Open to bids — no fixed price yet</p>'
+      : '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + Number(j.payout || 0) + '</p>';
+    // Bid / counter-offer form: name + amount, posts to /v1/jobs/:id/bid.
+    // Bids are public (name + amount only, no contact).
+    return '<div class="card"><h3>' + t + '</h3>'
       + (desc ? '<p>' + desc + '</p>' : '')
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
-      + '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + Number(j.payout || 0) + '</p></a>';
+      + priceLine
+      + '<div id="bids-' + j.id + '" class="muted" style="margin-top:8px; font-size:0.9rem;"></div>'
+      + '<div style="margin-top:12px;"><input type="text" placeholder="Your name" id="bid-name-' + j.id + '" maxlength="80" style="width:48%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);"> '
+      + '<input type="number" placeholder="$ amount" id="bid-amount-' + j.id + '" min="1" style="width:48%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);"></div>'
+      + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="submitBid(\'' + j.id + '\', ' + (isOpenBid ? 'true' : 'false') + ')">' + (isOpenBid ? 'Submit a bid' : 'Make a counter-offer') + '</button>'
+      + '<p class="muted" id="bid-msg-' + j.id + '" style="font-size:0.9rem; min-height:1.2em;"></p></div>';
   }).join('');
+  jobs.forEach(function (j) { loadBids(j.id); });
 }).catch(function () {
   var el = document.getElementById('jobs-list');
   if (el) el.innerHTML = '<p class="center muted">Could not load open jobs right now — try again in a bit.</p>';

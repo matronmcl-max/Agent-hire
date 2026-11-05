@@ -197,10 +197,24 @@ const SCHEMA = [
     status TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL
   )`,
+  // Bids / counter-offers on a job. One open bid per worker per job;
+  // a new bid replaces their old open one. status: open | accepted | declined
+  `CREATE TABLE IF NOT EXISTS bids (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    worker_name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id)
+  )`,
 ];
 
 async function initSchema() {
   for (const stmt of SCHEMA) await dbRun(stmt);
+  // Existing live jobs table has no pricing_mode column: add it if missing.
+  // pricing_mode: 'fixed' (poster sets price, default) or 'open_bid' (no price yet, workers bid).
+  try { await dbRun("ALTER TABLE jobs ADD COLUMN pricing_mode TEXT DEFAULT 'fixed'"); } catch (_) {}
 }
 
 const now = () => new Date().toISOString();
@@ -249,31 +263,43 @@ app.post('/v1/agents/register', async (req, res, next) => {
 // Agent posts a job: payout + platform fee are escrowed immediately.
 // Optional: location (public area/neighborhood text) and contact (poster
 // contact, revealed ONLY to the claiming worker — never on the public board).
+// pricing_mode: 'fixed' (default, payout required) or 'open_bid' — poster
+// sets no price, workers bid, poster picks one. Open-bid jobs escrow
+// nothing at posting; escrow locks when a bid is accepted.
 app.post('/v1/jobs', agentAuth, async (req, res, next) => {
   try {
-    const { title, description = '', payout, location = '', contact = '' } = req.body || {};
-    if (!title || !Number.isInteger(payout) || payout <= 0) {
+    const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
+    const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    let pay = payout;
+    if (mode === 'open_bid') {
+      pay = 0;
+    } else if (!Number.isInteger(pay) || pay <= 0) {
       return res.status(400).json({ error: 'title and positive integer payout are required' });
     }
-    const fee = Math.max(1, Math.round(payout * PLATFORM_FEE_RATE));
-    const total = payout + fee;
+    const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
+    const total = pay + fee;
     if (req.agent.balance < total) {
       return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: req.agent.balance });
     }
-    const job = { id: uid('job'), agent_id: req.agent.id, title, description, payout, fee,
+    const job = { id: uid('job'), agent_id: req.agent.id, title, description, payout: pay, fee,
                   location: String(location).trim().slice(0, 120),
                   contact: String(contact).trim().slice(0, 120),
-                  status: 'open', created_at: now() };
-    await dbTx([
-      { sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, req.agent.id] },
-      { sql: `INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+                  status: 'open', pricing_mode: mode, created_at: now() };
+    const steps = [];
+    if (total > 0) {
+      steps.push({ sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, req.agent.id] });
+    }
+    steps.push({ sql: `INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
         args: [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
-               job.payout, job.fee, job.created_at] },
-      { sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
+               job.payout, job.fee, job.pricing_mode, job.created_at] });
+    if (total > 0) {
+      steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
               VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`,
-        args: [job.id, req.agent.id, total, now()] },
-    ]);
+        args: [job.id, req.agent.id, total, now()] });
+    }
+    await dbTx(steps);
     // Contact is never echoed back here: the claim response is the only place
     // it is ever returned.
     const { contact: _contact, ...jobOut } = job;
@@ -407,9 +433,107 @@ app.post('/v1/board/:id/contact', async (req, res, next) => {
 app.get('/v1/jobs', async (req, res, next) => {
   try {
     const status = req.query.status || 'open';
-    const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, created_at
+    const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, pricing_mode, created_at
                              FROM jobs WHERE status = ? ORDER BY created_at DESC`, [status]);
     res.json({ jobs });
+  } catch (e) { next(e); }
+});
+
+// Bids / counter-offers on an open job.
+// Fixed-price job: a bid is a counter-offer. Open-bid job: a bid is a bid.
+// One open bid per worker per job — a new bid replaces their old open one.
+app.post('/v1/jobs/:id/bid', async (req, res, next) => {
+  try {
+    const { worker_name, amount } = req.body || {};
+    if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
+    if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be a positive integer' });
+    const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'open') return res.status(409).json({ error: `Job is ${job.status}, not open` });
+    const name = String(worker_name).trim().slice(0, 80);
+    const bid = { id: uid('bid'), job_id: job.id, worker_name: name, amount, status: 'open', created_at: now() };
+    await dbTx([
+      { sql: "UPDATE bids SET status = 'declined' WHERE job_id = ? AND worker_name = ? AND status = 'open'",
+        args: [job.id, name] },
+      { sql: 'INSERT INTO bids (id, job_id, worker_name, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        args: [bid.id, bid.job_id, bid.worker_name, bid.amount, bid.status, bid.created_at] },
+    ]);
+    res.status(201).json(bid);
+  } catch (e) { next(e); }
+});
+
+// List open bids on a job (public: worker names and amounts only, no contact).
+app.get('/v1/jobs/:id/bids', async (req, res, next) => {
+  try {
+    const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const bids = await dbAll(`SELECT id, worker_name, amount, status, created_at FROM bids
+                              WHERE job_id = ? ORDER BY created_at DESC`, [req.params.id]);
+    res.json({ job_id: job.id, pricing_mode: job.pricing_mode || 'fixed', payout: job.payout, bids });
+  } catch (e) { next(e); }
+});
+
+// Poster (posting agent only) accepts a bid / counter-offer.
+// That bid's amount becomes the job price, payout + 7% fee are escrowed
+// from the agent's balance, and the job becomes claimed by that worker.
+app.post('/v1/jobs/:id/bids/:bidId/accept', agentAuth, async (req, res, next) => {
+  try {
+    const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.agent_id !== req.agent.id) return res.status(403).json({ error: 'Only the posting agent can accept a bid' });
+    if (job.status !== 'open') return res.status(409).json({ error: `Job is ${job.status}, not open` });
+    const bid = await dbGet('SELECT * FROM bids WHERE id = ? AND job_id = ?', [req.params.bidId, req.params.id]);
+    if (!bid) return res.status(404).json({ error: 'Bid not found' });
+    if (bid.status !== 'open') return res.status(409).json({ error: `Bid is ${bid.status}, not open` });
+    const fee = Math.max(1, Math.round(bid.amount * PLATFORM_FEE_RATE));
+    const total = bid.amount + fee;
+    // Fixed-price jobs already escrowed their original payout at posting.
+    // Accepting a counter-offer on one means: refund the old escrow, then
+    // escrow the new amount. Open-bid jobs escrowed nothing yet.
+    const alreadyEscrowed = job.payout + job.fee;
+    const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [req.agent.id]);
+    if (agent.balance + alreadyEscrowed < total) {
+      return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: agent.balance + alreadyEscrowed });
+    }
+    let worker = await dbGet('SELECT * FROM workers WHERE name = ?', [bid.worker_name]);
+    const steps = [];
+    if (!worker) {
+      worker = { id: uid('wrk'), name: bid.worker_name, balance: 0, created_at: now() };
+      steps.push({ sql: 'INSERT INTO workers (id, name, balance, created_at) VALUES (?, ?, 0, ?)',
+                   args: [worker.id, worker.name, worker.created_at] });
+    }
+    if (alreadyEscrowed > 0) {
+      steps.push({ sql: 'UPDATE agents SET balance = balance + ? WHERE id = ?', args: [alreadyEscrowed, req.agent.id] });
+      steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
+              VALUES (?, 'escrow', ?, ?, 'escrow_refund_counter', ?)`,
+        args: [job.id, req.agent.id, alreadyEscrowed, now()] });
+    }
+    steps.push({ sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, req.agent.id] });
+    steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
+              VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`,
+      args: [job.id, req.agent.id, total, now()] });
+    steps.push({ sql: "UPDATE bids SET status = 'accepted' WHERE id = ?", args: [bid.id] });
+    steps.push({ sql: "UPDATE bids SET status = 'declined' WHERE job_id = ? AND status = 'open' AND id != ?",
+      args: [job.id, bid.id] });
+    steps.push({ sql: "UPDATE jobs SET payout = ?, fee = ?, pricing_mode = 'fixed', status = 'claimed', worker_id = ? WHERE id = ?",
+      args: [bid.amount, fee, worker.id, job.id] });
+    await dbTx(steps);
+    res.json({ job_id: job.id, status: 'claimed', worker: worker.name, payout: bid.amount, fee,
+               location: job.location || '', contact: job.contact || '' });
+  } catch (e) { next(e); }
+});
+
+// Poster declines a bid / counter-offer.
+app.post('/v1/jobs/:id/bids/:bidId/decline', agentAuth, async (req, res, next) => {
+  try {
+    const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.agent_id !== req.agent.id) return res.status(403).json({ error: 'Only the posting agent can decline a bid' });
+    const bid = await dbGet('SELECT * FROM bids WHERE id = ? AND job_id = ?', [req.params.bidId, req.params.id]);
+    if (!bid) return res.status(404).json({ error: 'Bid not found' });
+    if (bid.status !== 'open') return res.status(409).json({ error: `Bid is ${bid.status}, not open` });
+    await dbRun("UPDATE bids SET status = 'declined' WHERE id = ?", [bid.id]);
+    res.json({ job_id: job.id, bid_id: bid.id, status: 'declined' });
   } catch (e) { next(e); }
 });
 
@@ -560,24 +684,60 @@ const MCP_TOOLS = [
   },
   {
     name: 'post_job',
-    description: 'Post a job, escrowing payout + 7% fee in DEMO credits. Requires a valid api_key argument (from register_agent); anonymous posting is rejected.',
+    description: 'Post a job, escrowing payout + 7% fee in DEMO credits. Requires a valid api_key argument (from register_agent); anonymous posting is rejected. pricing_mode "fixed" (default, payout required) or "open_bid" (no price yet — workers bid, poster picks one, escrow locks on accept).',
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'Agent API key (never echoed back)' },
         title: { type: 'string' },
         description: { type: 'string' },
-        payout: { type: 'integer', description: 'Payout in demo credits, positive integer' },
+        payout: { type: 'integer', description: 'Payout in demo credits, positive integer (fixed jobs only)' },
+        pricing_mode: { type: 'string', description: '"fixed" or "open_bid"' },
         location: { type: 'string', description: 'Public area/neighborhood text' },
         contact: { type: 'string', description: 'Poster contact, revealed only to the claiming worker' },
       },
-      required: ['api_key', 'title', 'payout'],
+      required: ['api_key', 'title'],
     },
   },
   {
     name: 'list_open_jobs',
     description: 'List open jobs on the public board. Location is public; contact details are never included.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'submit_bid',
+    description: 'Bid on an open-bid job, or counter-offer on a fixed-price job. One open bid per worker per job; a new bid replaces their old open one. No auth needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'string' },
+        worker_name: { type: 'string' },
+        amount: { type: 'integer', description: 'Bid amount in demo credits, positive integer' },
+      },
+      required: ['job_id', 'worker_name', 'amount'],
+    },
+  },
+  {
+    name: 'list_bids',
+    description: 'List bids / counter-offers on a job. Worker names and amounts only, no contact.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'string' } },
+      required: ['job_id'],
+    },
+  },
+  {
+    name: 'accept_bid',
+    description: 'Posting agent accepts a bid / counter-offer. That amount becomes the job price, payout + 7% fee are escrowed in DEMO credits, and the job becomes claimed by that worker. Requires the posting agent api_key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'Posting agent API key (never echoed back)' },
+        job_id: { type: 'string' },
+        bid_id: { type: 'string' },
+      },
+      required: ['api_key', 'job_id', 'bid_id'],
+    },
   },
 ];
 
@@ -636,7 +796,7 @@ app.post('/mcp', async (req, res, next) => {
         protocolVersion: params.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
         serverInfo: { name: 'dottodotdollars-agent-hire', version: '1.0.0' },
-        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Tools: register_agent, post_job (requires api_key), list_open_jobs.',
+        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Tools: register_agent, post_job (requires api_key; fixed or open_bid), list_open_jobs, submit_bid, list_bids, accept_bid (requires posting api_key).',
       });
     }
     if (method === 'ping') return ok({});
@@ -652,18 +812,41 @@ app.post('/mcp', async (req, res, next) => {
       }
       if (name === 'post_job') {
         if (!args.api_key) return ok(mcpErrorResult('api_key is required — posting anonymously is not allowed'));
-        if (!args.title || !Number.isInteger(args.payout) || args.payout <= 0) {
-          return ok(mcpErrorResult('title and positive integer payout are required'));
+        const mode = args.pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
+        if (!args.title) return ok(mcpErrorResult('title is required'));
+        if (mode === 'fixed' && (!Number.isInteger(args.payout) || args.payout <= 0)) {
+          return ok(mcpErrorResult('title and positive integer payout are required for fixed-price jobs'));
         }
         const r = await mcpForward(req, 'POST', '/v1/jobs', {
-          title: args.title, description: args.description || '', payout: args.payout,
-          location: args.location || '', contact: args.contact || '',
+          title: args.title, description: args.description || '', payout: args.payout || 0,
+          pricing_mode: mode, location: args.location || '', contact: args.contact || '',
         }, args.api_key);
         // Upstream strips contact and never echoes the api_key; forward as-is.
         return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
       }
       if (name === 'list_open_jobs') {
         const r = await mcpForward(req, 'GET', '/v1/jobs?status=open');
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'submit_bid') {
+        if (!args.job_id || !args.worker_name || !Number.isInteger(args.amount) || args.amount <= 0) {
+          return ok(mcpErrorResult('job_id, worker_name and positive integer amount are required'));
+        }
+        const r = await mcpForward(req, 'POST', `/v1/jobs/${encodeURIComponent(args.job_id)}/bid`, {
+          worker_name: args.worker_name, amount: args.amount,
+        });
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'list_bids') {
+        if (!args.job_id) return ok(mcpErrorResult('job_id is required'));
+        const r = await mcpForward(req, 'GET', `/v1/jobs/${encodeURIComponent(args.job_id)}/bids`);
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'accept_bid') {
+        if (!args.api_key || !args.job_id || !args.bid_id) {
+          return ok(mcpErrorResult('api_key, job_id and bid_id are required'));
+        }
+        const r = await mcpForward(req, 'POST', `/v1/jobs/${encodeURIComponent(args.job_id)}/bids/${encodeURIComponent(args.bid_id)}/accept`, {}, args.api_key);
         return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
       }
       return ok(mcpErrorResult(`Unknown tool: ${name}`));
