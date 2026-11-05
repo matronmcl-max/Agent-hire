@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leaf Cleanup in Spokane, WA — Raking, Blowing &amp; Bagging | DotToDotDollars</title>
+<meta name="description" content="Leaf cleanup in Spokane, WA. A local club member rakes, blows, and bags your leaves — front and back yard, walkways and driveway cleared. You set the price, or leave it open to bids.">
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.4rem; margin-bottom: 16px; }
+  ul { color: var(--muted); padding-left: 24px; margin-bottom: 16px; }
+  ul li { margin-bottom: 8px; }
+  p { color: var(--muted); margin-bottom: 16px; }
+  .cta { text-align: center; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-top: 24px; }
+  .cta a { display: inline-block; background: var(--accent); color: #fff; padding: 14px 32px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 8px; }
+  .cta a.gold { background: transparent; border: 1px solid var(--gold); color: var(--gold); }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Leaf Cleanup in Spokane, WA</h1>
+  <p>Leaves piling up? A local will rake them, blow them out of the beds and corners, and bag them up.</p>
+</header>
+
+<section>
+  <h2>What it is</h2>
+  <p>A local club member comes to your yard and clears the leaves — front and back lawn, walkways and driveway blown clear, leaves bagged for pickup. Rakes and bags are provided.</p>
+  <ul>
+    <li>Raking — front and back lawns, any size</li>
+    <li>Blowing leaves out of flower beds, corners, and paths</li>
+    <li>Bagging — leaves bagged up and left ready for pickup</li>
+    <li>One-off cleanup or repeat visits through the fall, your call</li>
+  </ul>
+</section>
+
+<section>
+  <h2>When you need it</h2>
+  <p>Fall, usually October through November in Spokane, when the leaves are down and thick. A yard left under leaves all winter smothers the grass underneath — getting them up before the first hard freeze matters.</p>
+</section>
+
+<section>
+  <h2>What it costs</h2>
+  <p>Usually $15 an hour, or a flat price if it is a big yard. You set the price when you post the job — or leave it open to bids and let workers name their price. A worker can also counter-offer on a fixed-price job.</p>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <ul>
+    <li><strong>You describe the job</strong> — how big the yard is, front and back, and when you need it done.</li>
+    <li><strong>You set the price, or open it to bids</strong> — flat price, agreed before the job starts, or workers bid and you pick one.</li>
+    <li><strong>A club member does it</strong> — local, with rakes and bags provided.</li>
+    <li><strong>You approve, they get paid</strong> — your payment is held safely until the job is done right.</li>
+  </ul>
+  <p>The club keeps a flat 7% — out in the open, no hidden cuts.</p>
+</section>
+
+<div class="cta">
+  <p style="color:var(--fg); font-weight:600; margin-bottom:12px;">Ready to get your leaves cleared?</p>
+  <a href="mailto:dottodotdollars@gmail.com?subject=Leaf%20cleanup%20quote">Get a leaf cleanup quote →</a>
+  <a class="gold" href="/">Join the gig club</a>
+  <p style="margin-top:16px;"><a href="/gig-ideas">Browse all gig ideas →</a></p>
+</div>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
