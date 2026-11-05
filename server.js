@@ -308,9 +308,11 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
 });
 
 // Seeking-work board: the reverse of the jobs board — a person posts
-// the work they do and want to be hired for. Same contact rule as
-// jobs: the public list never includes contact; it is returned only
-// when someone asks for that post's contact (one tap on the page).
+// the work they do and want to be hired for. Hires MUST go through
+// the job flow (board -> job -> escrow -> 7%), so contact is NEVER
+// handed out directly for a seeking post. A person who wants to hire
+// them posts a job for that work; contact is shared only after the
+// job is claimed, exactly like a job claim.
 app.post('/v1/seeking', async (req, res, next) => {
   try {
     const { name, title, description = '', rate = '', location = '', contact = '' } = req.body || {};
@@ -343,7 +345,8 @@ app.post('/v1/seeking/:id/contact', async (req, res, next) => {
     const post = await dbGet('SELECT * FROM seeking WHERE id = ?', [req.params.id]);
     if (!post) return res.status(404).json({ error: 'Seeking post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
-    res.json({ id: post.id, name: post.name, contact: post.contact });
+    // No direct contact for seeking work — hire through a job instead.
+    return res.status(409).json({ error: 'Hire through a job — post a job for this person, and their contact is shared after the job is claimed.' });
   } catch (e) { next(e); }
 });
 
@@ -388,8 +391,12 @@ app.post('/v1/trade/:id/contact', async (req, res, next) => {
 });
 
 // General bulletin board: one board for everything — seeking work,
-// for sale, wanted, or anything else. One form, one list, same
-// contact rule: public list never includes contact, only on tap.
+// for sale, wanted, or anything else. One form, one list.
+// Contact rule, set Nov 5, 2026: SEEKING-WORK posts never give out
+// contact directly — a hire has to go through a job (board -> job ->
+// escrow -> 7%). Contact is shared only after that job is claimed.
+// Sales / wanted / other posts are flow only (no fee on them), so
+// their contact is still returned on tap.
 app.post('/v1/board', async (req, res, next) => {
   try {
     const { name, kind = 'other', title, description = '', price = '', location = '', contact = '' } = req.body || {};
@@ -424,6 +431,10 @@ app.post('/v1/board/:id/contact', async (req, res, next) => {
     const post = await dbGet('SELECT * FROM board_posts WHERE id = ?', [req.params.id]);
     if (!post) return res.status(404).json({ error: 'Bulletin board post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
+    if (post.kind === 'seeking') {
+      // No direct contact for seeking work — hire through a job instead.
+      return res.status(409).json({ error: 'Hire through a job — post a job for this person, and their contact is shared after the job is claimed.' });
+    }
     res.json({ id: post.id, name: post.name, contact: post.contact });
   } catch (e) { next(e); }
 });
