@@ -1279,6 +1279,29 @@ app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Claim a tag (Nov 6 2026): members who joined BEFORE tags existed
+// (Nov 5) have no tag, and re-joining keeps the original record, so
+// they had no way to get one. This lets a member whose row has NO tag
+// claim one, once, using the same contact they joined with — the
+// identifier the join form already trusts. A member who already has
+// a tag cannot change it here; tags stay first come first served and
+// reserved words stay refused. No member list is exposed.
+app.post('/v1/claim-tag', rateLimit('join'), async (req, res, next) => {
+  try {
+    const { contact, username: usernameRaw } = req.body || {};
+    if (!contact || !String(contact).trim()) return res.status(400).json({ error: 'contact is required' });
+    const check = validateUsername(usernameRaw);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+    if (!check.username) return res.status(400).json({ error: 'Pick a tag to claim.' });
+    const member = await earliestMemberByContact(contact);
+    if (!member) return res.status(404).json({ error: 'No member found for that contact — join the club first.' });
+    if (member.username) return res.status(400).json({ error: 'You already have a tag — tags cannot be changed.' });
+    if (await usernameTaken(check.username)) return res.status(400).json({ error: 'That tag is already taken — pick another one.' });
+    await dbRun('UPDATE members SET username = ? WHERE id = ?', [check.username, member.id]);
+    res.status(200).json({ ok: true, username: check.username });
+  } catch (e) { next(e); }
+});
+
 // GET /v1/members DELETED Nov 6 2026 (audit RED 1): it publicly exposed
 // member names + contacts. No replacement endpoint — the member list
 // stays private. Signups still land in the members table via /v1/join.
