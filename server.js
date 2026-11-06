@@ -37,7 +37,26 @@ app.use((err, req, res, next) => {
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const PLATFORM_FEE_RATE = 0.07; // 7% per completed job
-const DEMO_GRANT = 1000;        // demo credits granted on agent registration
+// MONEY IS INTEGER CENTS (100 cents = $1), Nov 6 2026. The 7% fee is
+// split evenly between poster and worker, so halves must be exact to
+// the cent — whole dollars could not hold a $3.50 half. Fee F =
+// max(100, round(payout * 0.07)) cents. Poster pays payout +
+// ceil(F/2); worker gets payout - floor(F/2); club keeps F exactly.
+// When F is odd in cents the poster pays the extra cent.
+const CENTS_PER_DOLLAR = 100;
+const MIN_FEE_CENTS = 100; // $1 minimum fee
+const DEMO_GRANT = 100000;  // 100,000 demo cents = $1,000 on agent registration
+function feeForCents(payoutCents) { return Math.max(MIN_FEE_CENTS, Math.round(payoutCents * PLATFORM_FEE_RATE)); }
+function posterShareCents(feeCents) { return Math.ceil(feeCents / 2); }
+function workerShareCents(feeCents) { return Math.floor(feeCents / 2); }
+function escrowForCents(payoutCents, feeCents) { return payoutCents + posterShareCents(feeCents); }
+function workerGetsCents(payoutCents, feeCents) { return payoutCents - workerShareCents(feeCents); }
+// Attach the split to a job row for API responses (all amounts cents).
+function withSplit(job) {
+  if (!job || job.payout == null || job.fee == null) return job;
+  const pay = Number(job.payout), fee = Number(job.fee);
+  return { ...job, poster_pays: escrowForCents(pay, fee), worker_gets: workerGetsCents(pay, fee) };
+}
 
 // ---------- Database ----------
 const TURSO_URL = process.env.TURSO_DATABASE_URL || '';
@@ -175,6 +194,10 @@ const SCHEMA = [
     user_agent TEXT DEFAULT '',
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS bridge_hands (
     id TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -249,6 +272,54 @@ const SCHEMA = [
   )`,
 ];
 
+// One-time migration: whole dollars -> integer cents (Nov 6 2026).
+// Guarded by meta.money_unit so it runs once. Live DBs had no real
+// paid jobs; local test DBs were empty. Released jobs are history —
+// their money already moved, leave them alone. For open/claimed/
+// completed agent jobs the old model had already charged the poster
+// payout+fee; the new model charges payout + ceil(fee/2), so refund
+// the overcharged floor(fee/2) to the agent and set escrowed to the
+// new amount. Website jobs hold nothing and are untouched.
+async function migrateMoneyToCents() {
+  let flag = null;
+  try { flag = await dbGet("SELECT value FROM meta WHERE key = 'money_unit'"); } catch (_) {}
+  if (flag && flag.value === 'cents') return;
+  const steps = [];
+  for (const [table, cols] of [
+    ['agents', ['balance']], ['workers', ['balance']],
+    ['jobs', ['payout', 'fee', 'escrowed']], ['bids', ['amount']], ['ledger', ['amount']],
+  ]) {
+    for (const col of cols) steps.push({ sql: `UPDATE ${table} SET ${col} = ${col} * 100`, args: [] });
+  }
+  await dbTx(steps);
+  let legacyJobs = [];
+  try {
+    legacyJobs = await dbAll(`SELECT * FROM jobs WHERE agent_id != 'agt_website'
+                              AND status IN ('open','claimed','completed') AND (payout + fee) > 0`);
+  } catch (_) {}
+  const fixSteps = [];
+  for (const job of legacyJobs) {
+    const held = Number(job.escrowed || 0);
+    if (held <= 0) continue; // never held anything; backfill below covers it
+    const fee = Number(job.fee || 0), pay = Number(job.payout || 0);
+    const over = Math.floor(fee / 2); // overcharged half under the old model
+    const newEscrowed = pay + Math.ceil(fee / 2);
+    if (over > 0) {
+      fixSteps.push({ sql: 'UPDATE agents SET balance = balance + ? WHERE id = ?', args: [over, job.agent_id] });
+      fixSteps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
+                    VALUES (?, 'escrow', ?, ?, 'fee_split_migration_refund', ?)`,
+        args: [job.id, job.agent_id, over, now()] });
+    }
+    fixSteps.push({ sql: 'UPDATE jobs SET escrowed = ? WHERE id = ?', args: [newEscrowed, job.id] });
+  }
+  if (fixSteps.length) await dbTx(fixSteps);
+  try {
+    await dbRun("INSERT INTO meta (key, value) VALUES ('money_unit', 'cents')");
+  } catch (_) {
+    await dbRun("UPDATE meta SET value = 'cents' WHERE key = 'money_unit'");
+  }
+}
+
 async function initSchema() {
   for (const stmt of SCHEMA) await dbRun(stmt);
   // Existing live jobs table has no pricing_mode column: add it if missing.
@@ -263,11 +334,13 @@ async function initSchema() {
     'ALTER TABLE jobs ADD COLUMN claim_code TEXT',
     "ALTER TABLE jobs ADD COLUMN claim_contact TEXT DEFAULT ''",
   ]) { try { await dbRun(col); } catch (_) {} }
-  // Backfill escrowed for legacy agent jobs that already hold escrow:
-  // open/claimed/completed agent jobs (not website jobs, not released)
-  // held payout+fee. Website jobs hold nothing (escrowed stays 0).
+  // Money moved to integer cents (see migrateMoneyToCents above).
+  await migrateMoneyToCents();
+  // Backfill escrowed for legacy agent jobs that somehow still show 0
+  // held: new split model — poster pays payout + ceil(fee/2).
+  // Website jobs hold nothing (escrowed stays 0).
   try {
-    await dbRun(`UPDATE jobs SET escrowed = payout + fee WHERE escrowed = 0
+    await dbRun(`UPDATE jobs SET escrowed = payout + (fee + 1) / 2 WHERE escrowed = 0
                  AND agent_id != 'agt_website' AND status IN ('open','claimed','completed')
                  AND (payout + fee) > 0`);
   } catch (_) {}
@@ -420,7 +493,10 @@ app.post('/v1/agents/register', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Agent posts a job: payout + platform fee are escrowed immediately.
+// Agent posts a job: payout + the poster's half of the 7% fee are
+// escrowed immediately (amounts in integer cents; 100 cents = $1).
+// The fee is split evenly: poster pays payout + ceil(fee/2), worker
+// gets payout - floor(fee/2), club keeps the full fee.
 // Optional: location (public area/neighborhood text) and contact (poster
 // contact, revealed ONLY to the claiming worker — never on the public board).
 // pricing_mode: 'fixed' (default, payout required) or 'open_bid' — poster
@@ -440,10 +516,10 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
       }
       pay = 0;
     } else if (!Number.isInteger(pay) || pay <= 0) {
-      return res.status(400).json({ error: 'title and a positive whole-dollar payout are required (or leave it open to bids)' });
+      return res.status(400).json({ error: 'title and a positive integer payout in cents are required (or leave it open to bids)' });
     }
-    const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
-    const total = pay + fee;
+    const fee = mode === 'open_bid' ? 0 : feeForCents(pay);
+    const total = escrowForCents(pay, fee);
     if (req.agent.balance < total) {
       return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: req.agent.balance });
     }
@@ -468,7 +544,7 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
     // Contact is never echoed back here: the claim response is the only place
     // it is ever returned.
     const { contact: _contact, ...jobOut } = job;
-    res.status(201).json({ ...jobOut, escrowed: total });
+    res.status(201).json({ ...withSplit(jobOut), escrowed: total });
   } catch (e) { next(e); }
 });
 
@@ -478,13 +554,15 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
 // in Open jobs, the club contacts the poster to arrange payment
 // before work starts, and the 7% fee is the stated price, not a held
 // amount. Same shape as agent jobs so the board, bids and claim flow
-// all work unchanged.
+// all work unchanged. The website form takes whole dollars from the
+// human poster and the server converts to cents; the fee is split
+// evenly between poster and worker (see the helpers at the top).
 app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
   try {
     const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
     const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
     if (!title || !contact) return res.status(400).json({ error: 'title and contact are required' });
-    let pay = payout;
+    let pay = 0; // cents; the form sends whole dollars, converted here
     if (mode === 'open_bid') {
       // Open-bid jobs take no price at posting — a supplied payout is a
       // caller mistake, so 400 instead of silently ignoring it (C5).
@@ -492,10 +570,12 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
         return res.status(400).json({ error: 'Open-bid jobs take no payout — leave payout out and let workers bid' });
       }
       pay = 0;
-    } else if (!Number.isInteger(pay) || pay <= 0) {
+    } else if (!Number.isInteger(payout) || payout <= 0) {
       return res.status(400).json({ error: 'title and a positive whole-dollar payout are required (or leave it open to bids)' });
+    } else {
+      pay = payout * CENTS_PER_DOLLAR;
     }
-    const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
+    const fee = mode === 'open_bid' ? 0 : feeForCents(pay);
     // jobs.agent_id has a foreign key to agents(id), so the website
     // form needs a real agent row to attach to. It holds no credits
     // and has no usable api_key — humans post here, not through the MCP.
@@ -513,7 +593,7 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
       [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
        job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at]);
     const { contact: _contact, ...jobOut } = job;
-    res.status(201).json({ ...jobOut, escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts.' });
+    res.status(201).json({ ...withSplit(jobOut), escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts. The 7% fee is split evenly: on a $100 job the poster pays $103.50 and the worker gets $96.50.' });
   } catch (e) { next(e); }
 });
 
@@ -667,7 +747,7 @@ app.get('/v1/jobs', async (req, res, next) => {
     const status = req.query.status || 'open';
     const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, pricing_mode, created_at
                              FROM jobs WHERE status = ? ORDER BY created_at DESC`, [status]);
-    res.json({ jobs });
+    res.json({ jobs: jobs.map(withSplit) });
   } catch (e) { next(e); }
 });
 
@@ -678,7 +758,7 @@ app.post('/v1/jobs/:id/bid', rateLimit('bid'), async (req, res, next) => {
   try {
     const { worker_name, amount } = req.body || {};
     if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
-    if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be a positive integer' });
+    if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be a positive integer in cents (100 cents = $1)' });
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'open') return res.status(409).json({ error: `Job is ${job.status}, not open` });
@@ -708,16 +788,20 @@ app.get('/v1/jobs/:id/bids', async (req, res, next) => {
     }
     const bids = await dbAll(`SELECT id, worker_name, amount, status, created_at FROM bids
                               WHERE job_id = ? ORDER BY created_at DESC`, [req.params.id]);
-    res.json({ job_id: job.id, pricing_mode: job.pricing_mode || 'fixed', payout: job.payout, bids });
+    const split = withSplit(job);
+    res.json({ job_id: job.id, pricing_mode: job.pricing_mode || 'fixed', payout: job.payout,
+               poster_pays: split.poster_pays, worker_gets: split.worker_gets, bids });
   } catch (e) { next(e); }
 });
 
 // Poster (posting agent's X-API-Key OR body { manage_code }) accepts a
 // bid / counter-offer. That bid's amount becomes the job price and the
 // job becomes claimed by that worker.
-// Agent jobs: payout + 7% fee are escrowed from the agent's balance
-// (fixed-price jobs already escrowed at posting — refund ONLY what was
-// actually held, then escrow the new amount; open-bid jobs held nothing).
+// Agent jobs: payout + the poster's half of the 7% fee are escrowed
+// from the agent's balance (fixed-price jobs already escrowed at
+// posting — refund ONLY what was actually held, then escrow the new
+// amount; open-bid jobs held nothing). Worker gets payout - half the
+// fee; the club keeps the full 7%.
 // Website/human jobs (agt_website): NO balance or escrow moves at all —
 // the poster holds no money, so accepting creates no credits (RED 2).
 app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
@@ -730,15 +814,16 @@ app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
     const bid = await dbGet('SELECT * FROM bids WHERE id = ? AND job_id = ?', [req.params.bidId, req.params.id]);
     if (!bid) return res.status(404).json({ error: 'Bid not found' });
     if (bid.status !== 'open') return res.status(409).json({ error: `Bid is ${bid.status}, not open` });
-    const fee = Math.max(1, Math.round(bid.amount * PLATFORM_FEE_RATE));
-    const total = bid.amount + fee;
+    const fee = feeForCents(bid.amount);
+    const total = escrowForCents(bid.amount, fee);
     const isWebsite = job.agent_id === 'agt_website';
     // Escrow actually held on this job: 0 for website/human jobs.
-    // Legacy rows were backfilled at startup; fall back to payout+fee
-    // for an agent job that somehow still shows 0 held.
+    // Legacy rows were backfilled at startup; fall back to payout +
+    // the poster's half of the fee for an agent job that somehow
+    // still shows 0 held.
     let alreadyEscrowed = Number(job.escrowed || 0);
     if (!isWebsite && alreadyEscrowed === 0 && (job.payout + job.fee) > 0) {
-      alreadyEscrowed = job.payout + job.fee;
+      alreadyEscrowed = escrowForCents(job.payout, job.fee);
     }
     let worker = await dbGet('SELECT * FROM workers WHERE name = ?', [bid.worker_name]);
     const steps = [];
@@ -749,8 +834,8 @@ app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
     }
     if (!isWebsite) {
       // Refund only what was actually held (never more than the old
-      // payout+fee), then escrow the new amount.
-      const refundAmount = Math.min(alreadyEscrowed, job.payout + job.fee);
+      // payout + poster's half-fee), then escrow the new amount.
+      const refundAmount = Math.min(alreadyEscrowed, escrowForCents(job.payout, job.fee));
       const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [job.agent_id]);
       if (!agent) return res.status(500).json({ error: 'Posting agent not found' });
       if (agent.balance + refundAmount < total) {
@@ -774,6 +859,7 @@ app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
       args: [bid.amount, fee, worker.id, isWebsite ? 0 : total, job.id] });
     await dbTx(steps);
     res.json({ job_id: job.id, status: 'claimed', worker: worker.name, payout: bid.amount, fee,
+               poster_pays: isWebsite ? 0 : total, worker_gets: workerGetsCents(bid.amount, fee),
                location: job.location || '', contact: job.contact || '', escrowed: isWebsite ? 0 : total });
   } catch (e) { next(e); }
 });
@@ -850,9 +936,10 @@ app.post('/v1/jobs/:id/complete', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Agent verifies and releases escrow: worker gets payout, platform keeps fee.
-// Only what escrow actually holds is paid out (0 for website jobs, which
-// hold no money) — releasing can never create credits from nothing.
+// Agent verifies and releases escrow: worker gets payout minus half
+// the 7% fee, platform keeps the full fee. Only what escrow actually
+// holds is paid out (0 for website jobs, which hold no money) —
+// releasing can never create credits from nothing.
 app.post('/v1/jobs/:id/release', agentAuth, async (req, res, next) => {
   try {
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
@@ -861,7 +948,7 @@ app.post('/v1/jobs/:id/release', agentAuth, async (req, res, next) => {
     if (job.status !== 'completed') return res.status(409).json({ error: `Job is ${job.status}, not completed` });
 
     const held = Number(job.escrowed || 0);
-    const paidWorker = Math.min(job.payout, held);
+    const paidWorker = Math.min(workerGetsCents(job.payout, job.fee), held);
     const paidFee = Math.min(job.fee, Math.max(0, held - paidWorker));
     await dbTx([
       { sql: 'UPDATE workers SET balance = balance + ? WHERE id = ?', args: [paidWorker, job.worker_id] },
@@ -873,7 +960,7 @@ app.post('/v1/jobs/:id/release', agentAuth, async (req, res, next) => {
         args: [job.id, paidFee, now()] },
       { sql: "UPDATE jobs SET status = 'released', released_at = ?, escrowed = 0 WHERE id = ?", args: [now(), job.id] },
     ]);
-    res.json({ job_id: job.id, status: 'released', paid_to_worker: paidWorker, platform_fee: paidFee });
+    res.json({ job_id: job.id, status: 'released', paid_to_worker: paidWorker, platform_fee: paidFee, poster_paid: held });
   } catch (e) { next(e); }
 });
 
@@ -988,7 +1075,7 @@ app.get('/v1/health', (req, res) => res.json({ ok: true, service: 'dottodotdolla
 const MCP_TOOLS = [
   {
     name: 'register_agent',
-    description: 'Register a new AI agent. Grants 1000 DEMO credits only (not real money). Returns agent_id and api_key — keep the api_key secret.',
+    description: 'Register a new AI agent. Grants 100,000 DEMO cents ($1,000) only (not real money). Returns agent_id and api_key — keep the api_key secret.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', description: 'Name for the agent' } },
@@ -997,14 +1084,14 @@ const MCP_TOOLS = [
   },
   {
     name: 'post_job',
-    description: 'Post a job, escrowing payout + 7% fee in DEMO credits. Requires a valid api_key argument (from register_agent); anonymous posting is rejected. pricing_mode "fixed" (default, payout required) or "open_bid" (no price yet — workers bid, poster picks one, escrow locks on accept).',
+    description: 'Post a job, escrowing payout + half the 7% fee in DEMO cents (100 cents = $1). The 7% fee is split evenly: the poster pays payout + half the fee, the worker gets payout - half the fee, and the club keeps the full 7%. Requires a valid api_key argument (from register_agent); anonymous posting is rejected. pricing_mode "fixed" (default, payout in cents required) or "open_bid" (no price yet — workers bid, poster picks one, escrow locks on accept).',
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'Agent API key (never echoed back)' },
         title: { type: 'string' },
         description: { type: 'string' },
-        payout: { type: 'integer', description: 'Payout in demo credits, positive integer (fixed jobs only)' },
+        payout: { type: 'integer', description: 'Payout in integer demo cents (100 cents = $1), positive integer (fixed jobs only). Example: 10000 = $100.' },
         pricing_mode: { type: 'string', description: '"fixed" or "open_bid"' },
         location: { type: 'string', description: 'Public area/neighborhood text' },
         contact: { type: 'string', description: 'Poster contact, revealed only to the claiming worker' },
@@ -1025,7 +1112,7 @@ const MCP_TOOLS = [
       properties: {
         job_id: { type: 'string' },
         worker_name: { type: 'string' },
-        amount: { type: 'integer', description: 'Bid amount in demo credits, positive integer' },
+        amount: { type: 'integer', description: 'Bid amount in integer demo cents (100 cents = $1), positive integer' },
       },
       required: ['job_id', 'worker_name', 'amount'],
     },
@@ -1041,7 +1128,7 @@ const MCP_TOOLS = [
   },
   {
     name: 'accept_bid',
-    description: 'Posting agent accepts a bid / counter-offer. That amount becomes the job price, payout + 7% fee are escrowed in DEMO credits, and the job becomes claimed by that worker. Requires the posting agent api_key.',
+    description: 'Posting agent accepts a bid / counter-offer. That amount becomes the job price, payout + half the 7% fee are escrowed in DEMO cents, and the job becomes claimed by that worker. Requires the posting agent api_key.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1173,7 +1260,7 @@ app.post('/mcp', async (req, res, next) => {
         protocolVersion: params.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
         serverInfo: { name: 'dottodotdollars-agent-hire', version: '1.0.0' },
-        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Tools: register_agent, post_job (requires api_key; fixed or open_bid), list_open_jobs, submit_bid, list_bids, accept_bid (requires posting api_key).',
+        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Money is integer cents (100 cents = $1). Tools: register_agent (grants 100,000 demo cents), post_job (requires api_key; fixed or open_bid; the 7% fee is split evenly between poster and worker), list_open_jobs, submit_bid, list_bids, accept_bid (requires posting api_key).',
       });
     }
     if (method === 'ping') return ok({});
@@ -1192,7 +1279,7 @@ app.post('/mcp', async (req, res, next) => {
         const mode = args.pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
         if (!args.title) return ok(mcpErrorResult('title is required'));
         if (mode === 'fixed' && (!Number.isInteger(args.payout) || args.payout <= 0)) {
-          return ok(mcpErrorResult('title and positive integer payout are required for fixed-price jobs'));
+          return ok(mcpErrorResult('title and positive integer payout in cents are required for fixed-price jobs'));
         }
         const r = await mcpForward(req, 'POST', '/v1/jobs', {
           title: args.title, description: args.description || '', payout: args.payout || 0,
