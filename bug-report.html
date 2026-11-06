@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report a bug — something not working? | DotToDotDollars</title>
+<meta name="description" content="Something broken on DotToDotDollars? Tell Mat and the club what went wrong. Nothing you send here is posted publicly.">
+<style>
+  :root { --bg: #4a256e; --fg: #f5f0ff; --muted: #c9b8e0; --accent: #8ab4ff; --gold: #f2c94c; --card: #3a1d5a; --border: #7a5ab0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  p { color: var(--muted); margin-bottom: 16px; }
+  p strong { color: var(--fg); }
+  form { max-width: 560px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+  form label { display: block; margin-bottom: 16px; font-size: 0.95rem; }
+  form input, form textarea { width: 100%; margin-top: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #341a52; color: var(--fg); font-size: 1rem; font-family: inherit; }
+  form textarea { min-height: 100px; resize: vertical; }
+  form button { width: 100%; background: #222d3a; color: #fff; border: 1px solid #3a4a5f; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; cursor: pointer; }
+  form button:hover { opacity: 0.9; }
+  #form-msg { text-align: center; margin-top: 16px; min-height: 1.5em; color: var(--gold); }
+  #thanks { display: none; text-align: center; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  #thanks p { color: var(--fg); font-size: 1.15rem; }
+  .back { text-align: center; padding: 24px 0; }
+  .back a { color: var(--accent); }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Something not working?</h1>
+  <p>Tell us what went wrong and what you were trying to do. Nothing you send here is posted publicly — it goes straight to Mat and the club.</p>
+</header>
+
+<section>
+  <form id="bug-form">
+    <label>What went wrong? *
+      <textarea id="what_went_wrong" name="what_went_wrong" required placeholder="What happened, in your own words?"></textarea>
+    </label>
+    <label>What page did it happen on?
+      <input id="page" name="page" type="text" placeholder="e.g. /bridge, or the jobs page">
+    </label>
+    <label>What were you trying to do?
+      <textarea id="trying_to_do" name="trying_to_do" placeholder="e.g. I was trying to post a job and the button did nothing"></textarea>
+    </label>
+    <label>What device or browser were you using? (if you know it)
+      <input id="device" name="device" type="text" placeholder="e.g. Android phone, Chrome">
+    </label>
+    <label>Your name (optional)
+      <input id="name" name="name" type="text" placeholder="So we know who to thank">
+    </label>
+    <label>How can we reach you? (optional)
+      <input id="contact" name="contact" type="text" placeholder="Email or phone — only if you want a reply">
+    </label>
+    <button type="submit">Report the bug →</button>
+    <p id="form-msg"></p>
+  </form>
+  <div id="thanks">
+    <p><strong>Thanks — Mat and the club read every bug report.</strong></p>
+    <p class="back"><a href="/">← Back to the homepage</a></p>
+  </div>
+  <p class="back"><a href="/">← Back to the homepage</a></p>
+</section>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('bug-form');
+  var msg = document.getElementById('form-msg');
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    msg.textContent = '';
+    var what = document.getElementById('what_went_wrong').value.trim();
+    if (!what) { msg.textContent = 'Please tell us what went wrong first.'; return; }
+    try {
+      var res = await fetch('/v1/bug-reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          what_went_wrong: what,
+          page: document.getElementById('page').value.trim(),
+          trying_to_do: document.getElementById('trying_to_do').value.trim(),
+          device: document.getElementById('device').value.trim(),
+          name: document.getElementById('name').value.trim(),
+          contact: document.getElementById('contact').value.trim()
+        })
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        msg.textContent = err.error || 'Something went wrong — please try again in a few minutes.';
+        return;
+      }
+      form.style.display = 'none';
+      document.getElementById('thanks').style.display = 'block';
+    } catch (e) {
+      msg.textContent = 'Something went wrong — please try again in a few minutes.';
+    }
+  });
+})();
+</script>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

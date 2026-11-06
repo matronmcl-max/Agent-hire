@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suggestions — tell the club your idea | DotToDotDollars</title>
+<meta name="description" content="Got an idea for DotToDotDollars? Tell Mat and the club. Nothing you send here is posted publicly.">
+<style>
+  :root { --bg: #4a256e; --fg: #f5f0ff; --muted: #c9b8e0; --accent: #8ab4ff; --gold: #f2c94c; --card: #3a1d5a; --border: #7a5ab0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  p { color: var(--muted); margin-bottom: 16px; }
+  p strong { color: var(--fg); }
+  form { max-width: 560px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+  form label { display: block; margin-bottom: 16px; font-size: 0.95rem; }
+  form input, form select, form textarea { width: 100%; margin-top: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #341a52; color: var(--fg); font-size: 1rem; font-family: inherit; }
+  form textarea { min-height: 120px; resize: vertical; }
+  form button { width: 100%; background: #222d3a; color: #fff; border: 1px solid #3a4a5f; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; cursor: pointer; }
+  form button:hover { opacity: 0.9; }
+  #form-msg { text-align: center; margin-top: 16px; min-height: 1.5em; color: var(--gold); }
+  #thanks { display: none; text-align: center; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  #thanks p { color: var(--fg); font-size: 1.15rem; }
+  .back { text-align: center; padding: 24px 0; }
+  .back a { color: var(--accent); }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Got an idea?</h1>
+  <p>Tell us what would make this site better. Nothing you send here is posted publicly — it goes straight to Mat and the club.</p>
+</header>
+
+<section>
+  <form id="suggestion-form">
+    <label>Your suggestion *
+      <textarea id="suggestion" name="suggestion" required placeholder="What should we add, change, or do better?"></textarea>
+    </label>
+    <label>Which part of the site is it about?
+      <select id="category" name="category">
+        <option>Jobs</option>
+        <option>Bulletin board</option>
+        <option>Bridge</option>
+        <option>Music</option>
+        <option>Fair play</option>
+        <option>Something else</option>
+      </select>
+    </label>
+    <label>Your name (optional)
+      <input id="name" name="name" type="text" placeholder="So we know who to thank">
+    </label>
+    <label>How can we reach you? (optional)
+      <input id="contact" name="contact" type="text" placeholder="Email or phone — only if you want a reply">
+    </label>
+    <button type="submit">Send suggestion →</button>
+    <p id="form-msg"></p>
+  </form>
+  <div id="thanks">
+    <p><strong>Thanks — Mat and the club read every suggestion.</strong></p>
+    <p class="back"><a href="/">← Back to the homepage</a></p>
+  </div>
+  <p class="back"><a href="/">← Back to the homepage</a></p>
+</section>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('suggestion-form');
+  var msg = document.getElementById('form-msg');
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    msg.textContent = '';
+    var suggestion = document.getElementById('suggestion').value.trim();
+    if (!suggestion) { msg.textContent = 'Please write your suggestion first.'; return; }
+    try {
+      var res = await fetch('/v1/suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          suggestion: suggestion,
+          category: document.getElementById('category').value,
+          name: document.getElementById('name').value.trim(),
+          contact: document.getElementById('contact').value.trim()
+        })
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        msg.textContent = err.error || 'Something went wrong — please try again in a few minutes.';
+        return;
+      }
+      form.style.display = 'none';
+      document.getElementById('thanks').style.display = 'block';
+    } catch (e) {
+      msg.textContent = 'Something went wrong — please try again in a few minutes.';
+    }
+  });
+})();
+</script>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

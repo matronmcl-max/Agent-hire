@@ -226,6 +226,27 @@ const SCHEMA = [
     created_at TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id)
   )`,
+  // Suggestions + bug reports from visitors. Nothing in these tables
+  // is ever listed publicly — no GET endpoint exposes them, and any
+  // contact left here stays private (same rule as member contacts).
+  `CREATE TABLE IF NOT EXISTS suggestions (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    category TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    contact TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS bug_reports (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    page TEXT DEFAULT '',
+    trying_to_do TEXT DEFAULT '',
+    device TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    contact TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+  )`,
 ];
 
 async function initSchema() {
@@ -272,7 +293,7 @@ function codesEqual(a, b) {
 // Simple abuse guard for public write + contact-revealing endpoints:
 // max 20 requests per 10 minutes per IP per endpoint, then 429.
 // Buckets are per endpoint (claim, board-contact, join, human-jobs,
-// board, bid, hit) so hammering one endpoint never blocks the others.
+// board, bid, hit, suggestions, bug-reports) so hammering one endpoint never blocks the others.
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const rateLimitBuckets = new Map(); // key "endpoint|ip" -> { count, resetAt }
@@ -887,6 +908,42 @@ app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
 // member names + contacts. No replacement endpoint — the member list
 // stays private. Signups still land in the members table via /v1/join.
 
+// Suggestions + bug reports: public forms on /suggestions and
+// /bug-report. Saved privately for Mat and the club — there is NO
+// public listing endpoint for either table, and contacts left here
+// are never shown anywhere on the site.
+const SUGGESTION_CATEGORIES = ['Jobs', 'Bulletin board', 'Bridge', 'Music', 'Fair play', 'Something else'];
+app.post('/v1/suggestions', rateLimit('suggestions'), async (req, res, next) => {
+  try {
+    const { suggestion, text, category = '', name = '', contact = '' } = req.body || {};
+    const body = String(suggestion || text || '').trim();
+    if (!body) return res.status(400).json({ error: 'suggestion is required' });
+    const cat = SUGGESTION_CATEGORIES.includes(String(category)) ? String(category) : 'Something else';
+    const row = { id: uid('sug'), text: body.slice(0, 2000), category: cat,
+                  name: String(name).trim().slice(0, 80), contact: String(contact).trim().slice(0, 120),
+                  created_at: now() };
+    await dbRun('INSERT INTO suggestions (id, text, category, name, contact, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [row.id, row.text, row.category, row.name, row.contact, row.created_at]);
+    res.status(201).json({ ok: true, suggestion_id: row.id });
+  } catch (e) { next(e); }
+});
+app.post('/v1/bug-reports', rateLimit('bug-reports'), async (req, res, next) => {
+  try {
+    const { what_went_wrong, text, page = '', trying_to_do = '', device = '', name = '', contact = '' } = req.body || {};
+    const body = String(what_went_wrong || text || '').trim();
+    if (!body) return res.status(400).json({ error: 'what went wrong is required' });
+    const row = { id: uid('bug'), text: body.slice(0, 2000),
+                  page: String(page).trim().slice(0, 200),
+                  trying_to_do: String(trying_to_do).trim().slice(0, 1000),
+                  device: String(device).trim().slice(0, 120),
+                  name: String(name).trim().slice(0, 80), contact: String(contact).trim().slice(0, 120),
+                  created_at: now() };
+    await dbRun('INSERT INTO bug_reports (id, text, page, trying_to_do, device, name, contact, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [row.id, row.text, row.page, row.trying_to_do, row.device, row.name, row.contact, row.created_at]);
+    res.status(201).json({ ok: true, bug_report_id: row.id });
+  } catch (e) { next(e); }
+});
+
 // Anonymous visit counter — logs page views, skips bots. No cookies, no personal data.
 app.post('/v1/hit', rateLimit('hit'), async (req, res, next) => {
   try {
@@ -1054,6 +1111,8 @@ app.get('/mcp', (req, res) => {
 <a href="/know-your-rights">Know your rights</a>
 <a href="/legal-help-spokane">Legal help</a>
 <a href="/proof">Proof</a>
+<a href="/suggestions">Suggestions</a>
+<a href="/bug-report">Report a bug</a>
 </nav>
 </header>
 <h2>Try it — live</h2>
@@ -1199,6 +1258,8 @@ app.get('/fairness', (req, res) => res.sendFile(path.join(__dirname, 'fairness.h
 app.get('/dispute-helper', (req, res) => res.sendFile(path.join(__dirname, 'dispute-helper.html')));
 app.get('/legal-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 'legal-help-spokane.html')));
 app.get('/know-your-rights', (req, res) => res.sendFile(path.join(__dirname, 'know-your-rights.html')));
+app.get('/suggestions', (req, res) => res.sendFile(path.join(__dirname, 'suggestions.html')));
+app.get('/bug-report', (req, res) => res.sendFile(path.join(__dirname, 'bug-report.html')));
 
 // Bridge solo game, you as South + 3 bots. Engine: bridge-engine (MIT).
 // Hands are persisted to the database (Turso live): a server restart
