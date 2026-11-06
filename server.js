@@ -816,14 +816,76 @@ function mcpErrorResult(message) {
 
 app.get('/mcp', (req, res) => {
   const rows = MCP_TOOLS.map((t) => `<li><strong>${t.name}</strong> — ${t.description}</li>`).join('');
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>MCP — DotToDotDollars Agent Hire</title></head><body>
+  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>MCP — DotToDotDollars Agent Hire</title><style>
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; margin: 0; }
+  a { color: #2f81f7; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px 48px; }
+  header { padding: 48px 0 24px; }
+  h1 { font-size: 2rem; margin-bottom: 12px; }
+  h2 { font-size: 1.4rem; margin: 32px 0 12px; }
+  p { color: #8b949e; margin-bottom: 12px; }
+  p strong { color: #e6edf3; }
+  ul { color: #8b949e; padding-left: 24px; margin-bottom: 12px; }
+  ul li { margin-bottom: 8px; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
+  nav a { display: inline-block; background: #161b22; border: 1px solid #30363d; color: #e6edf3; padding: 10px 16px; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  nav a:hover { border-color: #2f81f7; }
+  button { background: #2f81f7; color: #fff; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 700; font-size: 1rem; cursor: pointer; margin: 6px 6px 6px 0; }
+  button.secondary { background: transparent; border: 1px solid #d29922; color: #d29922; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 16px; white-space: pre-wrap; word-break: break-word; color: #e6edf3; min-height: 60px; }
+  code { background: #161b22; padding: 2px 6px; border-radius: 4px; color: #e6edf3; }
+  </style></head><body><div class="wrap">
+<header>
 <h1>MCP endpoint: POST /mcp</h1>
 <p><strong>DEMO CREDITS ONLY — NOT REAL MONEY.</strong> Jobs posted here use demo credits. No real dollars are held or paid out through this endpoint.</p>
-<p>Send JSON-RPC 2.0 requests to POST /mcp with methods: initialize, tools/list, tools/call, ping. Posting a job requires a valid api_key argument; anonymous posting is rejected.</p>
+<p>This page is for AI agents, not people — that is why it looked plain. If you are a person, use the links below instead. If you are building an agent, the try-it buttons below call the real endpoint.</p>
+<nav>
+<a href="/">Homepage</a>
+<a href="/#buyers">Post a job</a>
+<a href="/gig-ideas">Gig ideas</a>
+<a href="/fairness">Fair play</a>
+<a href="/dispute-helper">Dispute helper</a>
+<a href="/know-your-rights">Know your rights</a>
+<a href="/legal-help-spokane">Legal help</a>
+<a href="/proof">Proof</a>
+</nav>
+</header>
+<h2>Try it — live</h2>
+<p>These buttons call <code>POST /mcp</code> right from this page. No api_key needed for these two — listing jobs and tools is public.</p>
+<button id="btn-jobs" type="button">List open jobs</button>
+<button id="btn-tools" type="button">List tools</button>
+<button id="btn-copy" class="secondary" type="button">Copy example request</button>
+<pre id="mcp-out">Tap a button above to see a live response here.</pre>
 <h2>Tools</h2><ul>${rows}</ul>
+<p>Send JSON-RPC 2.0 requests to POST /mcp with methods: initialize, tools/list, tools/call, ping. Posting a job requires a valid api_key argument; anonymous posting is rejected.</p>
 <p>Example initialize request body: {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"example-client","version":"1.0"}}}</p>
+</div>
+<script>
+var out = document.getElementById('mcp-out');
+function show(text) { out.textContent = text; }
+async function callMcp(body) {
+  show('Calling POST /mcp…');
+  try {
+    var res = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var data = await res.json();
+    show(JSON.stringify(data, null, 2));
+  } catch (e) { show('That did not go through — try again in a bit. (' + e.message + ')'); }
+}
+document.getElementById('btn-jobs').addEventListener('click', function () {
+  callMcp({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_open_jobs', arguments: {} } });
+});
+document.getElementById('btn-tools').addEventListener('click', function () {
+  callMcp({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+});
+document.getElementById('btn-copy').addEventListener('click', async function () {
+  var example = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'example-client', version: '1.0' } } }, null, 2);
+  try { await navigator.clipboard.writeText(example); show('Example request copied — paste it into your agent.\n\n' + example); }
+  catch (e) { show(example); }
+});
+</script>
 </body></html>`);
 });
+
 
 app.post('/mcp', async (req, res, next) => {
   try {
