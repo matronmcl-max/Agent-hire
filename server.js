@@ -927,6 +927,10 @@ app.get('/leaf-cleanup-spokane', (req, res) => res.sendFile(path.join(__dirname,
 app.get('/snow-removal-spokane', (req, res) => res.sendFile(path.join(__dirname, 'snow-removal-spokane.html')));
 app.get('/house-cleaning-spokane', (req, res) => res.sendFile(path.join(__dirname, 'house-cleaning-spokane.html')));
 app.get('/pet-sitting-dog-walking-spokane', (req, res) => res.sendFile(path.join(__dirname, 'pet-sitting-dog-walking-spokane.html')));
+app.get('/fairness', (req, res) => res.sendFile(path.join(__dirname, 'fairness.html')));
+app.get('/dispute-helper', (req, res) => res.sendFile(path.join(__dirname, 'dispute-helper.html')));
+app.get('/legal-help-spokane', (req, res) => res.sendFile(path.join(__dirname, 'legal-help-spokane.html')));
+app.get('/know-your-rights', (req, res) => res.sendFile(path.join(__dirname, 'know-your-rights.html')));
 
 // Bridge solo game, you as South + 3 bots. Engine: bridge-engine (MIT).
 // Hands are persisted to the database (Turso live): a server restart

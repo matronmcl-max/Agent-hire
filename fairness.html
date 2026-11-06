@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fair play — our due-process promise | DotToDotDollars</title>
+<meta name="description" content="Our promise: no one on DotToDotDollars gets cut off, flagged, or loses pay on an AI call alone. You get the reason, in plain words, and a way to challenge it.">
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 64px 0 32px; text-align: center; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.15rem; }
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 1.4rem; margin-bottom: 16px; }
+  ul { color: var(--muted); padding-left: 24px; margin-bottom: 16px; }
+  ul li { margin-bottom: 8px; }
+  p { color: var(--muted); margin-bottom: 16px; }
+  p strong, li strong { color: var(--fg); }
+  .cta { text-align: center; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-top: 24px; }
+  .cta a { display: inline-block; background: var(--accent); color: #fff; padding: 14px 32px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 8px; }
+  .cta a.gold { background: transparent; border: 1px solid var(--gold); color: var(--gold); }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Fair play</h1>
+  <p>Our due-process promise. Plain words, no fine print.</p>
+</header>
+
+<section>
+  <h2>The idea, in one line</h2>
+  <p><strong>No one here gets cut off, flagged, or loses pay on an AI call alone.</strong> If a decision is made about you, you get the reason in plain words, and you get a way to challenge it.</p>
+  <p>This is the old Magna Carta idea, applied to AI: power has limits, and no one is punished without a fair hearing. And habeas corpus, in plain words: if you are held back, someone has to show why.</p>
+</section>
+
+<section>
+  <h2>What we promise</h2>
+  <ul>
+    <li><strong>You get the reason.</strong> Any flag, hold, or refusal comes with a plain-words reason — not just "system decision" or "policy."</li>
+    <li><strong>You get to answer back.</strong> You can challenge a decision, in your own words, and a person looks at it — not just the same AI that made the call.</li>
+    <li><strong>No secret punishment.</strong> We do not quietly cut someone off, hide a job from them, or take pay without telling them why.</li>
+    <li><strong>Your side gets heard.</strong> If there is a dispute over a job, both sides get to say what happened, with the messages, photos, and dates that back it up.</li>
+    <li><strong>An AI is a helper, not a judge.</strong> AI can draft, check, and explain — it does not get the final word on a person by itself.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>What this is not</h2>
+  <p>This is not a law firm, and it is not legal advice. We are not lawyers. This page is a promise about how this club treats people — not a legal contract, and not a substitute for a real lawyer when you need one.</p>
+  <p>If you need real legal help, the <a href="/legal-help-spokane">legal help page</a> is where members who do that kind of help can be found, and the <a href="/know-your-rights">know-your-rights page</a> explains common situations in plain words.</p>
+</section>
+
+<section>
+  <h2>If you think we got it wrong</h2>
+  <p>Use the <a href="/dispute-helper">dispute helper</a>. Tell it what happened, in your own words. It puts your side together — what was agreed, what happened, what proof you have — so you can send it in and be heard.</p>
+  <p>That helper is free to use. It does not send anything anywhere by itself. You read the draft, fix anything that is wrong, and decide whether to send it.</p>
+</section>
+
+<div class="cta">
+  <p style="color:var(--fg); font-weight:600; margin-bottom:12px;">Everyone deserves a decent defense.</p>
+  <a href="/dispute-helper">Use the dispute helper →</a>
+  <a class="gold" href="/know-your-rights">Know your rights →</a>
+  <p style="margin-top:16px;"><a href="/">Back to the homepage →</a></p>
+</div>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the Triple Thumbs Up Mindset project. Serving Spokane &amp; Coeur d'Alene.
+</footer>
+</div>
+<script>
+(function () {
+  try {
+    var data = JSON.stringify({ path: location.pathname, referrer: document.referrer || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/v1/hit', new Blob([data], { type: 'application/json' }));
+    } else {
+      fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
