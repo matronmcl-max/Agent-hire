@@ -8,7 +8,11 @@
   // a new hand (and a page reload). Counted once per hand, on finish.
   var total = { hands: 0, yourWins: 0, score: 0 };
   try { var saved = JSON.parse(localStorage.getItem('bridgeTotal') || 'null'); if (saved) total = saved; } catch (e) {}
+  // Finding 13: the counted session id must survive a reload too, or the
+  // in-memory guard resets and a finished hand gets counted twice.
+  // Persist it next to the total and skip counting when it matches.
   var countedSession = null;
+  try { countedSession = localStorage.getItem('bridgeCountedSession'); } catch (e) {}
   var seatNames = { N: 'North', E: 'East', S: 'South (you)', W: 'West' };
   var manualPaused = false, autoPaused = false;
   // $ must be defined before any listener uses it — it used to be
@@ -16,11 +20,17 @@
   // threw and the whole script died before ever dealing a hand.
   // That is why the page stuck on "Dealing a hand…" forever.
   var $ = function (id) { return document.getElementById(id); };
-  function sendPause(paused) {
+  function sendPause(paused, retried) {
     if (!session) return;
     fetch('/v1/bridge/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: session, paused: paused }) })
       .then(function (res) { return res.json(); })
-      .then(function (state) { render(state); });
+      .then(function (state) { render(state); })
+      .catch(function () {
+        // C12: one retry, then put the label back to the last known
+        // server state instead of leaving it showing the failed tap.
+        if (!retried) { sendPause(paused, true); }
+        else if (lastState) { render(lastState); }
+      });
   }
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
@@ -80,6 +90,7 @@
     if (state.error) {
       statusEl.textContent = 'That hand is gone — deal a new one.';
       metaEl.textContent = '';
+      $('pause-btn').disabled = true; // C11: no session, no pause button
       show($('auction-box'), false);
       show($('bid-box'), false);
       show($('contract-box'), false);
@@ -92,8 +103,9 @@
       $('result-text').textContent = 'The site was updated while you were playing, so that hand was lost. Tap below for a fresh hand.';
       return;
     }
-    metaEl.textContent = 'Dealer: ' + (state.dealerName || '—') + '  •  Vulnerable: ' +
-      (state.vulnerability === 'none' ? 'Nobody' : state.vulnerability === 'both' ? 'Both teams' : (state.vulnerability || '—')) +
+    // #29: spell the partnership out — "North-South" / "East-West".
+    var vulnText = { none: 'Nobody', both: 'Both teams', NS: 'North-South', EW: 'East-West' }[state.vulnerability] || (state.vulnerability || '—');
+    metaEl.textContent = 'Dealer: ' + (state.dealerName || '—') + '  •  Vulnerable: ' + vulnText +
       '  •  Your team: North + South';
     renderAuction(state);
 
@@ -132,7 +144,7 @@
           all.push({ id: level + s, text: level + ({ c: '♣', d: '♦', h: '♥', s: '♠', n: 'NT' })[s] });
         });
       }
-      all.push({ id: 'dbl', text: 'Double' }, { id: 'rdbl', text: 'Redouble' });
+      all.push({ id: 'dbl', text: 'Dbl' }, { id: 'rdbl', text: 'Re-Dbl' }); // #30: short labels, no wrap on narrow phones
       all.forEach(function (b) {
         var btn = document.createElement('button');
         btn.className = 'bid-btn';
@@ -152,7 +164,7 @@
       total.hands += 1;
       if (state.result.yourTeamScore > 0) total.yourWins += 1;
       total.score += state.result.yourTeamScore;
-      try { localStorage.setItem('bridgeTotal', JSON.stringify(total)); } catch (e) {}
+      try { localStorage.setItem('bridgeTotal', JSON.stringify(total)); localStorage.setItem('bridgeCountedSession', state.session); } catch (e) {}
     }
     show($('score-box'), !!state.contract);
     if (state.contract) {
@@ -182,17 +194,14 @@
       });
     }
 
-    // Contract + trick score.
+    // Contract — the deal itself. The trick count lives in the Score box
+    // only (#28: it used to print in both boxes).
     show($('contract-box'), !!state.contract);
     if (state.contract) {
       var c = state.contract;
       $('contract-text').textContent = c.text + ' by ' + c.declarerName +
         (c.vulnerable ? ' (vulnerable)' : ' (not vulnerable)') +
         ' — needs ' + c.tricksNeeded + ' tricks.';
-      $('trick-score').textContent = 'Tricks won: your team ' +
-        (c.declarer && (c.declarer === 'N' || c.declarer === 'S') ? state.declarerTricks : state.defenseTricks) +
-        ' • other team ' +
-        (c.declarer && (c.declarer === 'N' || c.declarer === 'S') ? state.defenseTricks : state.declarerTricks);
     }
 
     // Current trick — shown as a real table, North top, West left,
@@ -268,12 +277,15 @@
     }
   }
 
+  // C13: one poll loop only — a bid/play must not start a second one.
+  var polling = false;
   function poll() {
-    if (!session) return;
+    if (!session || polling) return;
+    polling = true;
     fetch('/v1/bridge/state?session=' + encodeURIComponent(session))
       .then(function (res) { return res.json(); })
-      .then(function (state) { render(state); if (state.status !== 'complete' && !state.error) setTimeout(poll, 700); })
-      .catch(function () { setTimeout(poll, 1500); });
+      .then(function (state) { render(state); polling = false; if (state.status !== 'complete' && !state.error) setTimeout(poll, 700); })
+      .catch(function () { polling = false; setTimeout(poll, 1500); });
   }
 
   function sendBid(bid) {
@@ -294,7 +306,7 @@
     show($('result-box'), false);
     fetch('/v1/bridge/new', { method: 'POST' })
       .then(function (res) { return res.json(); })
-      .then(function (data) { session = data.session; try { localStorage.setItem('bridgeSession', session); } catch (e) {} poll(); });
+      .then(function (data) { session = data.session; $('pause-btn').disabled = false; try { localStorage.setItem('bridgeSession', session); } catch (e) {} poll(); });
   }
 
   // No move timer: a turn never expires on the server. And reloading
@@ -310,6 +322,7 @@
       .then(function (state) {
         if (state.error) { newHand(); return; }
         session = savedSession;
+        $('pause-btn').disabled = false; // C11: session set, pause allowed
         render(state);
         if (state.status !== 'complete') poll();
       })

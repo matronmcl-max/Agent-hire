@@ -71,6 +71,64 @@ class SlowCardPlayer {
   async play(c, hand, dummy) { await waitWhilePaused(this._getPaused); await sleep(1100); await waitWhilePaused(this._getPaused); return this._inner.play(c, hand, dummy); }
   async playFromDummy(c, dummy, hand) { await waitWhilePaused(this._getPaused); await sleep(1100); await waitWhilePaused(this._getPaused); return this._inner.playFromDummy(c, dummy, hand); }
 }
+// Mat's own bidding system (North–South only, beginner-simple).
+// After South opens hearts, North answers in plain words:
+//   • No Trump = "raise hearts" — North holds 3+ hearts (and at least a
+//     few points), so South should raise hearts one level.
+//   • Pass = "stay" — no heart fit, so the hearts opening stands.
+// North bids the cheapest legal No Trump (1NT over 1♥), never the
+// standard jump raise to game. And once South has raised hearts after
+// North's No Trump signal, North passes — no jump to game either.
+class MatSystemBidder {
+  constructor(inner) { this._inner = inner; }
+  get seat() { return this._inner.seat; }
+  set seat(v) { this._inner.seat = v; }
+  get conventionCard() { return this._inner.conventionCard; }
+  acceptConventions(c) { return this._inner.acceptConventions(c); }
+  async startBoard() {}
+  async bid(board, hand) {
+    if (this.seat === 'N') {
+      const auction = board.auction;
+      const bids = auction.bids;
+      const myNormal = auction.getBidsBySeat('N', true);
+      const partnerNormal = auction.getBidsBySeat('S', true);
+      const lastNormal = auction.lastNormalBid;
+      // First response to partner's hearts opening, with nothing but
+      // passes since the opening (no overcall or double in between).
+      if (myNormal.length === 0 && partnerNormal.length === 1 &&
+          lastNormal && lastNormal.by === 'S' && lastNormal.type === 'normal' &&
+          lastNormal.strain === 'H') {
+        const openIdx = bids.findIndex((b) => b.by === 'S' && b.type === 'normal');
+        const sinceOpen = openIdx >= 0 ? bids.slice(openIdx + 1) : [];
+        const cleanRunUp = sinceOpen.every((b) => b.type === 'pass');
+        if (cleanRunUp) {
+          const hearts = hand.allCards.getSuit('H');
+          if (hearts.length >= 3 && hand.allCards.totalPoints >= 6) {
+            // Cheapest No Trump above partner's hearts: same level, since
+            // NT outranks hearts (1NT over 1♥, 2NT over 2♥, and so on).
+            const nt = new Bid('normal', lastNormal.count, 'N');
+            if (nt.isLarger(lastNormal)) return nt;
+          }
+          return new Bid('pass');
+        }
+      }
+      // My No Trump was Mat's "raise hearts" signal and South has since
+      // raised hearts: stay. Pass, whatever the opponents did after.
+      if (myNormal.length === 1 && myNormal[0].strain === 'N') {
+        const myNtIndex = bids.findIndex((b) => b.by === 'N' && b.type === 'normal');
+        const prevNormal = myNtIndex > 0
+          ? [...bids.slice(0, myNtIndex)].reverse().find((b) => b.type === 'normal')
+          : null;
+        if (prevNormal && prevNormal.by === 'S' && prevNormal.strain === 'H') {
+          const partnerRaised = bids.slice(myNtIndex + 1).some((b) => b.by === 'S' && b.type === 'normal' && b.strain === 'H');
+          if (partnerRaised) return new Bid('pass');
+        }
+      }
+    }
+    return this._inner.bid(board, hand);
+  }
+}
+
 // Robot bidding is instant, so a paused hand would otherwise bid on
 // while the user is away. Make the bidder wait while paused, too.
 class PausingBidder {
@@ -285,8 +343,9 @@ function serialize(session) {
 // ------------------------------------------------------------- sessions ---
 const sessions = new Map();
 function setPaused(session, paused) { if (session) session.paused = !!paused; }
-function makeRobot(getPaused) {
-  return new BridgePlayer(new PausingBidder(new BbsBidder(), getPaused), new SlowCardPlayer(new BasicCardPlayer(), getPaused));
+function makeRobot(getPaused, matSystem) {
+  const bidder = matSystem ? new MatSystemBidder(new BbsBidder()) : new BbsBidder();
+  return new BridgePlayer(new PausingBidder(bidder, getPaused), new SlowCardPlayer(new BasicCardPlayer(), getPaused));
 }
 function newSession() {
   const id = crypto.randomBytes(8).toString('hex');
@@ -298,12 +357,12 @@ function newSession() {
   // conventions do not match its partner's, and the human base player
   // carries approach 'none' while the bot bidder carries 'bbs'.
   table.assignTeam('NS', [
-    makeRobot(getPaused),
+    makeRobot(getPaused, true), // North bids Mat's system with South
     human,
   ]);
   table.assignTeam('EW', [
-    makeRobot(getPaused),
-    makeRobot(getPaused),
+    makeRobot(getPaused, false),
+    makeRobot(getPaused, false),
   ]);
   session.table = table;
   session.human = human;
@@ -337,15 +396,15 @@ async function restoreSession(snap) {
     const getPaused = () => session.paused;
     const human = new HumanPlayer(session);
     const replay = { bids: snap.bids || [], bidIndex: 0, plays: snap.plays || [], playIndex: 0 };
-    const robot = () => makeRobot(getPaused);
+    const robot = (mat) => makeRobot(getPaused, mat);
     const table = new BridgeTable({ assignContract: false });
     table.assignTeam('NS', [
-      new ReplayPlayer(robot(), replay),
+      new ReplayPlayer(robot(true), replay),
       new ReplayPlayer(human, replay),
     ]);
     table.assignTeam('EW', [
-      new ReplayPlayer(robot(), replay),
-      new ReplayPlayer(robot(), replay),
+      new ReplayPlayer(robot(false), replay),
+      new ReplayPlayer(robot(false), replay),
     ]);
     session.table = table;
     session.human = human;
@@ -398,8 +457,20 @@ function submitPlay(session, cardIdValue) {
   const playingHand = pending.kind === 'playFromDummy' ? pending.dummy : pending.hand;
   const card = findCard(playingHand, cardIdValue);
   if (!card) throw new Error('That card is not in the hand you are playing from.');
+  // Follow suit: if a suit was led and this hand still holds it, only
+  // that suit may be played. Reject BEFORE clearing pending or resolving,
+  // so the trick is untouched and the player simply retries.
+  const tricks = session.board.tricks;
+  const currentTrick = tricks.length ? tricks[tricks.length - 1] : null;
+  const leadSuit = currentTrick ? currentTrick.getLeadSuit() : null;
+  if (leadSuit) {
+    const eligible = playingHand.getEligibleToPlay(leadSuit).cards;
+    if (!eligible.some((c) => cardId(c) === cardIdValue)) {
+      throw new Error('You must follow the suit that was led if you can');
+    }
+  }
   session.pending = null;
   pending.resolve(card);
 }
 
-module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, restoreSession, setSaveFn, snapshot, setPaused, SEAT_NAMES };
+module.exports = { newSession, startSession, getSession, serialize, submitBid, submitPlay, restoreSession, setSaveFn, snapshot, setPaused, SEAT_NAMES, MatSystemBidder };

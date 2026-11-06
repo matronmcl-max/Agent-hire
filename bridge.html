@@ -6,9 +6,10 @@
 <title>Bridge — DotToDotDollars</title>
 <meta name="description" content="Play bridge on DotToDotDollars: you as South, with three robot players. Real bidding, real card play.">
 <style>
-  /* Same tidy rules as the homepage: links blue, gold for highlights,
-     red only for important warnings/results. Everything else neutral. */
-  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --blue: #2f81f7; --gold: #d29922; --red: #f85149; --card: #161b22; --border: #30363d; }
+  /* Homepage purple palette: #4a256e foundation, #3a1d5a cards (C14).
+     Blue kept for links/buttons, gold for highlights, red only for
+     important warnings/results. */
+  :root { --bg: #4a256e; --fg: #e6edf3; --muted: #c5b3d6; --blue: #2f81f7; --gold: #d29922; --red: #f85149; --card: #3a1d5a; --border: #5b3a7d; --panel: #2e1849; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
   a { color: var(--blue); }
@@ -27,7 +28,7 @@
   .big-btn:disabled { opacity: 0.4; cursor: default; }
   /* Bidding grid: big tappable buttons, one per bid. */
   .bid-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
-  .bid-btn { padding: 14px 4px; font-size: 1.05rem; font-weight: 700; border-radius: 10px; border: 1px solid var(--border); background: #1c2128; color: var(--fg); cursor: pointer; }
+  .bid-btn { padding: 14px 4px; font-size: 1.05rem; font-weight: 700; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer; }
   .bid-btn:disabled { opacity: 0.35; cursor: default; }
   .bid-btn:not(:disabled) { background: var(--blue); color: #fff; }
   /* Cards: big, tappable, white like real cards. */
@@ -38,7 +39,7 @@
   .card-btn:not(:disabled):hover { border-color: var(--blue); }
   /* The table: North top, West left, East right, South bottom — like sitting at a real table. */
   .table-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; margin-top: 12px; text-align: center; }
-  .table-slot { background: #1c2128; border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px; min-height: 78px; }
+  .table-slot { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px; min-height: 78px; }
   .table-slot .seat { font-size: 0.85rem; color: var(--muted); }
   .table-slot .played { font-size: 1.7rem; font-weight: 700; display: block; margin-top: 4px; }
   .table-slot .played.red-suit { color: #f85149; }
@@ -62,7 +63,7 @@
     <p id="status" class="center">Dealing a hand…</p>
     <p id="error" class="center red"></p>
     <p class="center muted" id="meta"></p>
-    <p class="center"><button class="big-btn" id="pause-btn" style="margin:12px auto 0;max-width:320px;">Pause the robots</button></p>
+    <p class="center"><button class="big-btn" id="pause-btn" style="margin:12px auto 0;max-width:320px;" disabled>Pause the robots</button></p>
   </div>
 
   <div class="box" id="score-box" style="display:none;">
@@ -98,7 +99,8 @@
       <thead><tr><th>North</th><th>East</th><th>South (you)</th><th>West</th></tr></thead>
       <tbody id="auction-body"></tbody>
     </table>
-    <p class="muted" style="margin-top:8px;">Bidding in plain words: each bid says how many tricks your team thinks it will win, over the first six. Pass means "not this time." Double means "I think they will fail." A contract is set when three players in a row pass.</p>
+    <p class="muted" style="margin-top:8px;">Bidding in plain words: each bid says how many tricks over six your team thinks it will win. Three passes in a row sets the contract.</p>
+    <p style="margin-top:8px;"><strong>Our system, North–South:</strong> after your 1♥ opening, when nobody has butted in, North's No Trump means “raise hearts” — raise hearts one level. North passing instead means “stay at 1♥.”</p>
   </div>
 
   <div class="box" id="bid-box" style="display:none;">
@@ -110,7 +112,6 @@
   <div class="box" id="contract-box" style="display:none;">
     <h3>Contract</h3>
     <p id="contract-text"></p>
-    <p class="muted" id="trick-score"></p>
   </div>
 
   <div class="box" id="dummy-box" style="display:none;">
@@ -133,7 +134,7 @@
 
   <div class="box">
     <h3>How the robots play</h3>
-    <p class="muted">The robots use a simple beginner system for bidding and simple rules for card play — they play like beginners, not experts. That is on purpose for this first version: easy to learn against, and the game stays simple. Stronger robot play can come later.</p>
+    <p class="muted">The robots use a simple beginner system for bidding and simple rules for card play — they play like beginners, not experts. That is on purpose for this first version: easy to learn against, and the game stays simple. Stronger robot play can come later. North plays your system with you: after your 1♥ opening, when nobody has butted in, North's No Trump asks you to raise hearts, and a pass means stay.</p>
   </div>
 </div>
 <script src="/bridge.js"></script>
