@@ -687,15 +687,15 @@ document.addEventListener('click', function (e) {
 });
 </script>
 <script>
-// Background music — Trailer Park Boys theme + 10 more, YouTube embed only.
+// Background music — Trailer Park Boys theme + 11 more, YouTube embed only.
 // No hosted audio, no autoplay. One toggle at the top: "Music: Off" /
 // "Music: On". Off by default. Choice is remembered in localStorage, but
 // sound always needs a tap each visit: if the last choice was On, the
 // toggle shows On and the player is cued (paused, silent) — tap the
 // player's play button, or flip the toggle off and on, to hear it.
-// Playlist: exactly these 11 tracks, in this order, looped.
+// Playlist: exactly these 12 tracks, in this order, looped.
 (function () {
-  var TRACKS = ['1F9Y-c9m3p4', '0JP3ddrWc6s', 'aI9_jcN1yIU', 'qDasDj8pHFk', 'z_Y3mnj-8lA', 'wJJGikSD9ho', 'q_t_G42VHFg', 'GJtTfP2hEHU', 'DkWn69VBslw', 'pt4C8j439IE', '2vTomEuuIZA'];
+  var TRACKS = ['1F9Y-c9m3p4', '0JP3ddrWc6s', 'aI9_jcN1yIU', 'qDasDj8pHFk', 'z_Y3mnj-8lA', 'wJJGikSD9ho', 'q_t_G42VHFg', 'GJtTfP2hEHU', 'DkWn69VBslw', 'pt4C8j439IE', '2vTomEuuIZA', '8FIBPKRV3kk'];
   var KEY = 'ttum-music';
   var toggle = document.getElementById('music-toggle');
   var label = document.getElementById('music-label');
