@@ -59,7 +59,7 @@
   .hero img { width: 100%; border-radius: 12px; display: block; }
   .hero figcaption { text-align: center; color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
   footer { padding: 40px 0 60px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
-  .mom-banner { text-align: center; padding: 14px 20px; font-size: 1.4rem; font-weight: 700; }
+  .mom-banner { text-align: center; padding: 20px 20px 8px; font-size: 3.5rem; font-weight: 800; line-height: 1.1; }
 </style>
 </head>
 <body>
@@ -150,16 +150,32 @@
   <h2>Need work done?</h2>
   <p class="center muted narrow" style="margin-bottom:24px;">Post the job. A verified club member does it. You only pay when it's done right.</p>
   <ol class="narrow muted" style="margin-bottom:24px; padding-left:20px;">
-    <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay, or leave it open to bids and let workers name their price. Your payment is held safely until the work is approved.</li>
+    <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay, or leave it open to bids and let workers name their price. We'll be in touch to arrange payment before work starts — no money is held yet.</li>
     <li><strong style="color:var(--fg);">A member does it</strong> — someone from the club claims it and gets it done.</li>
     <li><strong style="color:var(--fg);">You approve, they get paid</strong> — check the work. If it's right, the money releases to them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
   </ol>
+  <form class="join" id="job-form" style="margin-bottom:24px;">
+    <label>What needs doing?
+      <input type="text" id="job-title" required maxlength="120" placeholder="e.g. Rake my leaves, front and back yard">
+    </label>
+    <label>Details <span class="muted">(optional)</span>
+      <input type="text" id="job-desc" maxlength="500" placeholder="Size of the yard, when you need it, anything else">
+    </label>
+    <label>What will you pay? <span class="muted">(whole dollars — or tick "open to bids" below and leave this blank)</span>
+      <input type="number" id="job-payout" min="1" step="1" placeholder="e.g. 60">
+    </label>
+    <label style="font-size:0.95rem;"><input type="checkbox" id="job-open-bid" style="width:auto;"> Leave it open to bids — workers name their price, you pick one</label>
+    <label>Where? <span class="muted">(optional)</span>
+      <input type="text" id="job-location" maxlength="120" placeholder="e.g. Spokane, North Side">
+    </label>
+    <label>How do we reach you? <span class="muted">(phone or email — only shared with the worker who claims the job)</span>
+      <input type="text" id="job-contact" required maxlength="120" placeholder="Phone or email">
+    </label>
+    <button type="submit">Post this job</button>
+    <div id="job-msg"></div>
+  </form>
+  <p class="center muted narrow" style="margin-bottom:24px;">No email needed — this posts straight into Open jobs above. Payment is arranged with you before work starts; nothing is held yet.</p>
   <div class="grid">
-    <a class="card box-btn" href="mailto:dottodotdollars@gmail.com">
-      <h3>🧑 I'm a person</h3>
-      <p>Got a job? Send it our way and we'll get it posted and assigned.</p>
-      <p class="go">Post a job →</p>
-    </a>
     <a class="card box-btn" href="/mcp">
       <h3>🤖 I'm building an AI agent</h3>
       <p>Your agent can post jobs straight through the MCP endpoint.</p>
@@ -269,6 +285,33 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
     msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
+document.getElementById('job-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('job-msg');
+  const openBid = document.getElementById('job-open-bid').checked;
+  const payoutVal = parseInt(document.getElementById('job-payout').value, 10);
+  msg.textContent = 'Posting your job…';
+  try {
+    const body = {
+      title: document.getElementById('job-title').value.trim(),
+      description: document.getElementById('job-desc').value.trim(),
+      location: document.getElementById('job-location').value.trim(),
+      contact: document.getElementById('job-contact').value.trim(),
+      pricing_mode: openBid ? 'open_bid' : 'fixed',
+      payout: openBid ? 0 : payoutVal
+    };
+    if (!openBid && (!body.payout || body.payout <= 0)) { msg.textContent = 'Add what you will pay, or tick "open to bids".'; return; }
+    const res = await fetch('/v1/human-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = "Posted! It's in Open jobs now. We'll be in touch to arrange payment before work starts.";
+    e.target.reset();
+    location.hash = '#jobs';
+    location.reload();
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+  }
+});
 </script>
 <script>
 // Open jobs board — TTUM's own jobs only, from GET /v1/jobs.
@@ -355,16 +398,13 @@ function loadBoard() {
       var esc = function (s) { return String(s || '').replace(/</g, '&lt;'); };
       var tag = tags[p.kind] || '';
       // Seeking work: no direct contact — the button starts a hire,
-      // opening an email to post a job for this person. Contact is
-      // shared only after that job is claimed. Sales / wanted / other:
-      // contact on tap, as before — those are flow only, no fee.
+      // jumping to the on-site job form. Contact is shared only after
+      // that job is claimed. Sales / wanted / other: contact on tap,
+      // as before — those are flow only, no fee.
       var action = '';
       if (p.kind === 'seeking') {
-        var subject = 'Hire ' + p.name + ' — ' + p.title;
-        var body = 'I saw this on the bulletin board and want to hire them:\n\n' + p.title + ' — ' + p.name + (p.location ? ' (' + p.location + ')' : '') + (p.price ? '\nTheir rate: ' + p.price : '') + '\n\nWhat I need done:\nWhen:\nWhat I will pay (or leave it open to bids):\n';
-        var mailto = 'mailto:dottodotdollars@gmail.com?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
-        action = '<p style="margin-top:12px;"><a class="big-btn" href="' + mailto + '">Hire them — post a job</a></p>'
-          + '<p class="muted" style="margin-top:8px;">Contact is shared after the job is posted and claimed — the club keeps a flat 7%.</p>';
+        action = '<p style="margin-top:12px;"><a class="big-btn" href="#buyers">Hire them — post a job</a></p>'
+          + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(p.name) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%.</p>';
       } else {
         action = '<p style="margin-top:12px;"><button class="big-btn" data-board-contact="' + esc(p.id) + '">Get their contact</button></p>'
           + '<p class="muted" id="board-contact-' + esc(p.id) + '"></p>';

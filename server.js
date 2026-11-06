@@ -307,6 +307,45 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Human posts a job from the on-site form — NO email, NO api key.
+// Honest limit, Nov 5 2026: this does NOT escrow real money (no real
+// payment rail yet — Stripe bank still not linked). The job goes live
+// in Open jobs, the club contacts the poster to arrange payment
+// before work starts, and the 7% fee is the stated price, not a held
+// amount. Same shape as agent jobs so the board, bids and claim flow
+// all work unchanged.
+app.post('/v1/human-jobs', async (req, res, next) => {
+  try {
+    const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
+    const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
+    if (!title || !contact) return res.status(400).json({ error: 'title and contact are required' });
+    let pay = payout;
+    if (mode === 'open_bid') {
+      pay = 0;
+    } else if (!Number.isInteger(pay) || pay <= 0) {
+      return res.status(400).json({ error: 'title and a positive whole-dollar payout are required (or leave it open to bids)' });
+    }
+    const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
+    // jobs.agent_id has a foreign key to agents(id), so the website
+    // form needs a real agent row to attach to. It holds no credits
+    // and its api_key is never used to post — humans post here, not
+    // through the MCP.
+    await dbRun(`INSERT OR IGNORE INTO agents (id, name, api_key, balance, created_at)
+                 VALUES ('agt_website', 'Website job form', 'dtd_website_form_no_key', 0, ?)`, [now()]);
+    const job = { id: uid('job'), agent_id: 'agt_website', title: String(title).trim().slice(0, 120),
+                  description: String(description).trim().slice(0, 500),
+                  payout: pay, fee, location: String(location).trim().slice(0, 120),
+                  contact: String(contact).trim().slice(0, 120),
+                  status: 'open', pricing_mode: mode, created_at: now() };
+    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+      [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
+       job.payout, job.fee, job.pricing_mode, job.created_at]);
+    const { contact: _contact, ...jobOut } = job;
+    res.status(201).json({ ...jobOut, escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts.' });
+  } catch (e) { next(e); }
+});
+
 // Seeking-work board: the reverse of the jobs board — a person posts
 // the work they do and want to be hired for. Hires MUST go through
 // the job flow (board -> job -> escrow -> 7%), so contact is NEVER
