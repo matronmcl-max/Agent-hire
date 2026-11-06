@@ -60,10 +60,33 @@
   .hero figcaption { text-align: center; color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
   footer { padding: 40px 0 60px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
   .mom-banner { text-align: center; padding: 20px 20px 8px; font-size: 3.5rem; font-weight: 800; line-height: 1.1; }
+  @media (max-width: 600px) { .mom-banner { font-size: 2rem; } }
+  /* Music toggle: one switch at the top of the homepage, off by default.
+     Dark slate like the other buttons; gold track when on. */
+  .music-row { text-align: center; padding: 8px 24px 0; }
+  .music-toggle { display: inline-flex; align-items: center; gap: 12px; background: #222d3a; color: #fff; border: 1px solid #3a4a5f; border-radius: 999px; padding: 10px 18px; font-size: 1.05rem; font-weight: 700; cursor: pointer; }
+  .music-toggle:hover { opacity: 0.9; }
+  .music-switch { display: inline-block; width: 46px; height: 26px; border-radius: 999px; background: #555; position: relative; flex: none; }
+  .music-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+  .music-toggle[aria-checked="true"] .music-switch { background: #f2c94c; }
+  .music-toggle[aria-checked="true"] .music-knob { left: 23px; background: #222d3a; }
+  .music-credit { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+  #music-player-wrap { max-width: 320px; margin: 12px auto 0; }
+  #music-player-wrap iframe { width: 100%; height: 180px; border: 0; border-radius: 12px; display: block; }
+  /* Bulletin-board kind dropdown: same dark styling as the other inputs. */
+  #board-kind { background: #341a52; border: 1px solid var(--border); color: var(--fg); }
 </style>
 </head>
 <body>
 <div class="mom-banner">Hello Mom ❤️</div>
+<div class="music-row">
+  <button id="music-toggle" class="music-toggle" type="button" role="switch" aria-checked="false">
+    <span id="music-label">Music: Off</span>
+    <span class="music-switch" aria-hidden="true"><span class="music-knob"></span></span>
+  </button>
+  <p class="music-credit">Music: Trailer Park Boys theme "Breeze" by Blain Morris, plus more — tap to play.</p>
+</div>
+<div id="music-player-wrap" hidden><div id="music-player"></div></div>
 <div class="wrap">
 
 <header>
@@ -105,6 +128,36 @@
     <p class="center muted">Loading open jobs…</p>
   </div>
   <p class="center" style="margin-top:24px;"><a href="/proof">See completed jobs and the <span class="red">7% fee</span>, out in the open →</a></p>
+</section>
+
+<section id="manage">
+  <h2>Manage my job</h2>
+  <p class="center muted narrow" style="margin-bottom:24px;">Posted a job here? Put in its job ID to see the bids on it. The job ID was shown when you posted.</p>
+  <form class="join" id="manage-form" style="margin-bottom:24px;">
+    <label>Job ID
+      <input type="text" id="manage-job-id" required maxlength="40" placeholder="e.g. job_abc123">
+    </label>
+    <label>Manage code <span class="muted">(if you were given one — leave blank if not)</span>
+      <input type="text" id="manage-code" maxlength="80" placeholder="Your manage code, if you have one">
+    </label>
+    <button type="submit">Show bids</button>
+    <div id="manage-msg"></div>
+  </form>
+  <div id="manage-bids" class="grid narrow"></div>
+  <form class="join" id="done-form" style="margin-top:24px;">
+    <p class="center" style="margin-bottom:16px;"><strong>Mark a job done</strong><br><span class="muted">If you claimed a job and finished it, put in the job ID, your name, and the claim code you got when you claimed it.</span></p>
+    <label>Job ID
+      <input type="text" id="done-job-id" required maxlength="40" placeholder="e.g. job_abc123">
+    </label>
+    <label>Your name
+      <input type="text" id="done-name" required maxlength="80" placeholder="The name you claimed it with">
+    </label>
+    <label>Claim code
+      <input type="text" id="done-code" required maxlength="20" placeholder="The code you got when you claimed it">
+    </label>
+    <button type="submit">Mark it done</button>
+    <div id="done-msg"></div>
+  </form>
 </section>
 
   <figure class="hero" style="margin-top:32px;"><img src="/images/spokane-river-rapids.jpg" alt="Spokane River rapids rushing past rocks"></figure>
@@ -149,11 +202,11 @@
   <figure class="hero" style="margin-top:32px;"><img src="/images/spokane-river-bridge.jpg" alt="Spokane River and bridge on a sunny day"></figure>
 <section id="buyers">
   <h2>Need work done?</h2>
-  <p class="center muted narrow" style="margin-bottom:24px;">Post the job. A verified club member does it. You only pay when it's done right.</p>
+  <p class="center muted narrow" style="margin-bottom:24px;">Post the job. A local club member does it. You only pay when it's done right.</p>
   <ol class="narrow muted" style="margin-bottom:24px; padding-left:20px;">
     <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay, or leave it open to bids and let workers name their price. We'll be in touch to arrange payment before work starts — no money is held yet.</li>
     <li><strong style="color:var(--fg);">A member does it</strong> — someone from the club claims it and gets it done.</li>
-    <li><strong style="color:var(--fg);">You approve, they get paid</strong> — check the work. If it's right, the money releases to them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
+    <li><strong style="color:var(--fg);">You approve, then you pay them</strong> — check the work. If it's right, you pay them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
   </ol>
   <form class="join" id="job-form" style="margin-bottom:24px;">
     <label>What needs doing?
@@ -165,6 +218,7 @@
     <label>What will you pay? <span class="muted">(whole dollars — or tick "open to bids" below and leave this blank)</span>
       <input type="number" id="job-payout" min="1" step="1" placeholder="e.g. 60">
     </label>
+    <p id="job-fee-line" class="muted" style="font-size:0.95rem; margin:-8px 0 16px;"></p>
     <label style="font-size:0.95rem;"><input type="checkbox" id="job-open-bid" style="width:auto;"> Leave it open to bids — workers name their price, you pick one</label>
     <label>Where? <span class="muted">(optional)</span>
       <input type="text" id="job-location" maxlength="120" placeholder="e.g. Spokane, North Side">
@@ -190,9 +244,6 @@
   <figure class="hero" style="margin-top:32px;"><img src="/images/spokane-river-rocks.jpg" alt="Spokane River rapids and rocks, bridge overhead"></figure>
   <blockquote style="text-align:center; font-style:italic; font-size:1.1rem; max-width:640px; margin:0 auto 20px;">"A specialist's real value is their specialized intelligence — the judgment, know-how, and ways of working that set them apart from everyone else using the same tools."</blockquote>
   <p class="center muted narrow">We're seeking the people who do this work — when someone who specializes in one of these joins as a member, that service becomes available here.</p>
-  <div class="btn-grid" style="margin-top:24px;">
-    <a class="big-btn txt-red" href="/gig-ideas">Browse all gig ideas</a>
-  </div>
 </section>
 
 <section>
@@ -209,17 +260,20 @@
     <label>How do we reach you? <span class="muted">(phone or email)</span>
       <input type="text" id="join-contact" required maxlength="120" placeholder="Phone or email">
     </label>
+    <label>Which gig? <span class="muted">(optional — filled in when you tap a gig idea)</span>
+      <input type="text" id="join-gig" maxlength="120" placeholder="e.g. Leaf cleanup">
+    </label>
     <button type="submit">Count me in</button>
     <div id="join-msg"></div>
   </form>
-  <p class="fine">Safety circles welcome.</p>
+  <p class="fine">Your contact stays private — it's never posted publicly.</p>
 </section>
 
-  <figure class="hero" style="margin-top:32px;"><img src="/images/spokane-river-bridge-railing.jpg" alt="Spokane River bridge seen from a walkway railing"></figure>
+  <figure class="hero" style="margin-top:16px;"><img src="/images/spokane-river-bridge-railing.jpg" alt="Spokane River bridge seen from a walkway railing"></figure>
 <section id="help">
   <h2>Help for folks who are struggling</h2>
   <p class="center muted narrow">This site was born from helping people who are struggling. This is a resource from another organization — not run by us — shared because it may help someone here.</p>
-  <div class="card" style="max-width:640px;margin:20px auto;text-align:center;">
+  <div class="card" style="max-width:640px;margin:12px auto;text-align:center;">
     <h3>FCS Services — MHA Speak Out Speak Up</h3>
     <p class="muted">Housing help and employment help, with one-on-one case management.</p>
     <img src="/images/fcs-services.jpg" alt="FCS Services flyer: housing and employment help" style="width:100%;height:auto;border-radius:10px;margin:12px 0;">
@@ -229,14 +283,15 @@
     <p><strong>Contact FCS Services:</strong><br>
     Email: <a href="mailto:mhaspeakoutspeakup@gmail.com">mhaspeakoutspeakup@gmail.com</a><br>
     Phone: 509-385-5286<br>
-    3012 N Nevada St, Suite #1, Spokane</p>
+    3012 N Nevada St, Suite #1, Spokane<br>
+    <a href="https://www.google.com/maps/dir/?api=1&destination=3012+N+Nevada+St%2C+Spokane%2C+WA">Get directions on Maps →</a></p>
   </div>
 </section>
 
 <section id="market">
   <h2>Why this kind of business is coming</h2>
   <p class="center muted narrow">Outside research, not our own claim — shared because it backs up the direction this club is heading: AI work is growing fast, and the systems around it have to catch up.</p>
-  <div class="card" style="max-width:640px;margin:20px auto;text-align:center;">
+  <div class="card" style="max-width:640px;margin:12px auto;text-align:center;">
     <h3>IDC InfoBrief — Generative and Agentic AI-Ready Infrastructure</h3>
     <img src="/images/idc-infobrief.jpg" alt="IDC InfoBrief table of contents on AI-ready infrastructure" style="width:100%;height:auto;border-radius:10px;margin:12px 0;">
     <p style="text-align:left;">What that research covers, in plain words:</p>
@@ -279,7 +334,7 @@
 <section id="origination">
   <h2>Origination matters</h2>
   <p class="center muted narrow">A personal note from the founder, kept here as a reminder — and for anyone else who is awake to the same idea.</p>
-  <div class="card" style="max-width:640px;margin:20px auto;text-align:center;">
+  <div class="card" style="max-width:640px;margin:12px auto;text-align:center;">
     <p style="text-align:left;">When you put a concept into words and later see it come back as a polished, commercial feature, that is not always a coincidence. Too often, a person's input is treated as raw material — refined, packaged, and sold back — while the terms around it were never written to protect the person who originated it.</p>
     <p style="text-align:left;">This club is built the other way: the people who do the work, and the people who originate the ideas, are the ones the value is supposed to reach. That is why the fee is small, flat, and in the open — 7%, forever — instead of hidden in the fine print.</p>
     <img src="/images/gemini-origination.jpg" alt="Screenshot of a personal conversation about ideas being taken and repackaged" style="width:100%;height:auto;border-radius:10px;margin:12px 0;">
@@ -294,17 +349,28 @@
 
 </div>
 <script>
+// Join form: "Which gig?" is prefilled from ?gig= (tapped on gig-ideas).
+(function () {
+  try {
+    var gig = new URLSearchParams(location.search).get('gig');
+    if (gig) {
+      var gigEl = document.getElementById('join-gig');
+      if (gigEl) gigEl.value = gig.replace(/-/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+  } catch (e) {}
+})();
 document.getElementById('join-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('join-msg');
   const name = document.getElementById('join-name').value.trim();
   const contact = document.getElementById('join-contact').value.trim();
+  const gig = document.getElementById('join-gig').value.trim();
   msg.textContent = 'Joining…';
   try {
     const res = await fetch('/v1/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, contact })
+      body: JSON.stringify({ name, contact, gig: gig || undefined })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
@@ -314,6 +380,23 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
     msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
+// Fee line under the payout field: fee = max(1, round(payout * 0.07)).
+// Worker gets payout minus the fee. Open-to-bids: no fee set yet.
+function updateFeeLine() {
+  var line = document.getElementById('job-fee-line');
+  if (!line) return;
+  var openBid = document.getElementById('job-open-bid').checked;
+  if (openBid) {
+    line.textContent = 'No fee set yet — the fee is 7% of the accepted bid (minimum $1).';
+    return;
+  }
+  var payout = parseInt(document.getElementById('job-payout').value, 10);
+  if (!payout || payout <= 0) { line.textContent = ''; return; }
+  var fee = Math.max(1, Math.round(payout * 0.07));
+  line.textContent = 'Club fee: $' + fee + ' (7%, minimum $1). Worker gets $' + (payout - fee) + '.';
+}
+document.getElementById('job-payout').addEventListener('input', updateFeeLine);
+document.getElementById('job-open-bid').addEventListener('change', updateFeeLine);
 document.getElementById('job-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('job-msg');
@@ -333,8 +416,12 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
     const res = await fetch('/v1/human-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
-    msg.textContent = "Posted! It's in Open jobs now. We'll be in touch to arrange payment before work starts.";
+    // The server returns the job's id and a one-time manage code — show
+    // both so the poster can find the job's bids in "Manage my job" below.
+    var codeLine = data.manage_code ? " Your manage code is " + data.manage_code + " — keep this code, it's how you accept or decline bids on this job. Don't share it." : '';
+    msg.textContent = "Posted! It's in Open jobs now. Your job ID is " + (data.id || 'shown on the job card') + "." + codeLine + " We'll be in touch to arrange payment before work starts; nothing is held yet.";
     e.target.reset();
+    updateFeeLine();
     location.hash = '#jobs';
     location.reload();
   } catch (err) {
@@ -376,6 +463,27 @@ function submitBid(jobId, isOpenBid) {
     loadBids(jobId);
   }).catch(function () { msg.textContent = 'Could not send it right now — try again in a bit.'; });
 }
+// Claim an open job: POST /v1/jobs/:id/claim {worker_name, worker_contact}.
+// The server returns the poster's contact and a one-time claim_code —
+// show both: the contact to reach the poster, and the code (needed later
+// to mark the job done).
+function claimJob(jobId) {
+  var nameEl = document.getElementById('claim-name-' + jobId);
+  var contactEl = document.getElementById('claim-contact-' + jobId);
+  var msg = document.getElementById('claim-msg-' + jobId);
+  var name = nameEl ? nameEl.value.trim() : '';
+  var contact = contactEl ? contactEl.value.trim() : '';
+  if (!name) { msg.textContent = 'Add your name first.'; return; }
+  msg.textContent = 'Claiming it…';
+  fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/claim', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ worker_name: name, worker_contact: contact })
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); }).then(function (out) {
+    if (!out.ok) { msg.textContent = (out.data && out.data.error) || 'That did not go through.'; return; }
+    var codeLine = out.data.claim_code ? " Your claim code is " + out.data.claim_code + " — keep this code, you'll need it to mark the job done." : '';
+    msg.textContent = "It's yours! Reach the poster at: " + (out.data.contact || 'the contact they left') + "." + codeLine;
+  }).catch(function () { msg.textContent = 'Could not claim it right now — try again in a bit.'; });
+}
 fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
   var el = document.getElementById('jobs-list');
   if (!el) return;
@@ -398,11 +506,16 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
       + (desc ? '<p>' + desc + '</p>' : '')
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
       + priceLine
+      + '<p class="muted" style="margin-top:8px; font-size:0.9rem;">No real money is held on this job yet — payment is arranged with the poster before work starts.</p>'
       + '<div id="bids-' + j.id + '" class="muted" style="margin-top:8px; font-size:0.9rem;"></div>'
       + '<div style="margin-top:12px;"><input type="text" placeholder="Your name" id="bid-name-' + j.id + '" maxlength="80" style="width:48%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);"> '
       + '<input type="number" placeholder="$ amount" id="bid-amount-' + j.id + '" min="1" style="width:48%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);"></div>'
       + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="submitBid(\'' + j.id + '\', ' + (isOpenBid ? 'true' : 'false') + ')">' + (isOpenBid ? 'Submit a bid' : 'Make a counter-offer') + '</button>'
-      + '<p class="muted" id="bid-msg-' + j.id + '" style="font-size:0.9rem; min-height:1.2em;"></p></div>';
+      + '<p class="muted" id="bid-msg-' + j.id + '" style="font-size:0.9rem; min-height:1.2em;"></p>'
+      + '<div style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px;"><input type="text" placeholder="Your name" id="claim-name-' + j.id + '" maxlength="80" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg); margin-bottom:8px;">'
+      + '<input type="text" placeholder="How can the poster reach you? (phone or email)" id="claim-contact-' + j.id + '" maxlength="120" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);">'
+      + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="claimJob(\'' + j.id + '\')">Claim this job</button>'
+      + '<p class="muted" id="claim-msg-' + j.id + '" style="font-size:0.9rem; min-height:1.2em;"></p></div></div>';
   }).join('');
   jobs.forEach(function (j) { loadBids(j.id); });
 }).catch(function () {
@@ -432,7 +545,10 @@ function loadBoard() {
       // as before — those are flow only, no fee.
       var action = '';
       if (p.kind === 'seeking') {
-        action = '<p style="margin-top:12px;"><a class="big-btn" href="#buyers">Hire them — post a job</a></p>'
+        // Hire prefill: tapping this fills the job form with the person's
+        // name and job title, then jumps to it. Values are URI-encoded so
+        // quotes in a name or title cannot break the button.
+        action = '<p style="margin-top:12px;"><button class="big-btn" data-hire-name="' + encodeURIComponent(p.name || '') + '" data-hire-title="' + encodeURIComponent(p.title || '') + '" data-hire-price="' + encodeURIComponent(p.price || '') + '">Hire them — post a job</button></p>'
           + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(p.name) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%.</p>';
       } else {
         action = '<p style="margin-top:12px;"><button class="big-btn" data-board-contact="' + esc(p.id) + '">Get their contact</button></p>'
@@ -485,6 +601,166 @@ document.getElementById('board-form').addEventListener('submit', async (e) => {
     msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
+</script>
+<script>
+// Manage my job — show a job's bids, accept/decline them, mark a job done.
+// Show bids is public: GET /v1/jobs/:id/bids (manage code sent as a query
+// param, per the API contract). Accept/decline POST the manage code in the
+// body; the server answers with the result or a plain error.
+// Mark done: POST /v1/jobs/:id/complete {worker_name}.
+function escHtml(s) { return String(s || '').replace(/</g, '&lt;'); }
+document.getElementById('manage-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var jobId = document.getElementById('manage-job-id').value.trim();
+  var code = document.getElementById('manage-code').value.trim();
+  var msg = document.getElementById('manage-msg');
+  var out = document.getElementById('manage-bids');
+  if (!jobId) { msg.textContent = 'Add the job ID first.'; return; }
+  msg.textContent = 'Loading bids…';
+  out.innerHTML = '';
+  try {
+    var url = '/v1/jobs/' + encodeURIComponent(jobId) + '/bids' + (code ? '?manage_code=' + encodeURIComponent(code) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) { msg.textContent = data.error || 'Something went wrong — check the job ID and try again in a bit.'; return; }
+    var bids = (data.bids || []).filter(function (b) { return b.status === 'open'; });
+    if (!bids.length) { msg.textContent = 'No open bids on this job yet.'; return; }
+    msg.textContent = bids.length + ' open bid' + (bids.length === 1 ? '' : 's') + ' on this job:';
+    out.innerHTML = bids.map(function (b) {
+      return '<div class="card"><h3>' + escHtml(b.worker_name) + ' — $' + Number(b.amount || 0) + '</h3>'
+        + '<p class="muted" style="font-size:0.9rem;">Bid ID: ' + escHtml(b.id) + '</p>'
+        + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'accept\')">Accept this bid</button>'
+        + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'decline\')">Decline</button>'
+        + '<p class="muted" id="decide-msg-' + escHtml(b.id) + '" style="font-size:0.9rem; min-height:1.2em;"></p></div>';
+    }).join('');
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — check the job ID and try again in a bit.';
+  }
+});
+function decideBid(jobId, bidId, action) {
+  var code = document.getElementById('manage-code').value.trim();
+  var msg = document.getElementById('decide-msg-' + bidId);
+  if (!code) { msg.textContent = 'Add your manage code first — it\'s how the site knows it\'s your job.'; return; }
+  msg.textContent = action === 'accept' ? 'Accepting…' : 'Declining…';
+  fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/bids/' + encodeURIComponent(bidId) + '/' + action, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manage_code: code })
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); }).then(function (out) {
+    if (!out.ok) { msg.textContent = (out.data && out.data.error) || 'That did not go through.'; return; }
+    msg.textContent = action === 'accept' ? 'Accepted — that worker has the job now.' : 'Declined.';
+  }).catch(function () { msg.textContent = 'Could not send it right now — try again in a bit.'; });
+}
+document.getElementById('done-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var jobId = document.getElementById('done-job-id').value.trim();
+  var name = document.getElementById('done-name').value.trim();
+  var code = document.getElementById('done-code').value.trim();
+  var msg = document.getElementById('done-msg');
+  msg.textContent = 'Marking it done…';
+  try {
+    const res = await fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/complete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worker_name: name, claim_code: code })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = 'Done — marked complete. The poster checks the work, then pays you.';
+    e.target.reset();
+  } catch (err) {
+    msg.textContent = 'Hmm, that didn\u2019t go through — check the job ID, the name you claimed it with, and your claim code.';
+  }
+});
+// Hire prefill: a bulletin-board "Hire them" tap fills the job form with
+// that person's name and job title, then jumps to the form.
+document.addEventListener('click', function (e) {
+  var btn = e.target && e.target.closest ? e.target.closest('[data-hire-name]') : null;
+  if (!btn) return;
+  var name = decodeURIComponent(btn.getAttribute('data-hire-name') || '');
+  var title = decodeURIComponent(btn.getAttribute('data-hire-title') || '');
+  var price = decodeURIComponent(btn.getAttribute('data-hire-price') || '');
+  var titleEl = document.getElementById('job-title');
+  var descEl = document.getElementById('job-desc');
+  if (titleEl) titleEl.value = title + (name ? ' — for ' + name : '');
+  if (descEl) descEl.value = 'Hiring ' + name + ' from the bulletin board: ' + title + (price ? ' (' + price + ')' : '') + '. Contact is shared after the job is posted and claimed.';
+  location.hash = '#buyers';
+  if (titleEl) titleEl.focus();
+});
+</script>
+<script>
+// Background music — Trailer Park Boys theme + 10 more, YouTube embed only.
+// No hosted audio, no autoplay. One toggle at the top: "Music: Off" /
+// "Music: On". Off by default. Choice is remembered in localStorage, but
+// sound always needs a tap each visit: if the last choice was On, the
+// toggle shows On and the player is cued (paused, silent) — tap the
+// player's play button, or flip the toggle off and on, to hear it.
+// Playlist: exactly these 11 tracks, in this order, looped.
+(function () {
+  var TRACKS = ['1F9Y-c9m3p4', '0JP3ddrWc6s', 'aI9_jcN1yIU', 'qDasDj8pHFk', 'z_Y3mnj-8lA', 'wJJGikSD9ho', 'q_t_G42VHFg', 'GJtTfP2hEHU', 'DkWn69VBslw', 'pt4C8j439IE', '2vTomEuuIZA'];
+  var KEY = 'ttum-music';
+  var toggle = document.getElementById('music-toggle');
+  var label = document.getElementById('music-label');
+  var wrap = document.getElementById('music-player-wrap');
+  var player = null, apiReady = false, apiLoading = false, apiCbs = [], wantPlay = false;
+  function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+  function save(v) { try { localStorage.setItem(KEY, v); } catch (e) {} }
+  function setUI(on) {
+    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    label.textContent = on ? 'Music: On' : 'Music: Off';
+    wrap.hidden = !on;
+  }
+  function loadApi(cb) {
+    if (apiReady) { cb(); return; }
+    apiCbs.push(cb);
+    if (apiLoading) return;
+    apiLoading = true;
+    var s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+  window.onYouTubeIframeAPIReady = function () {
+    apiReady = true;
+    var cbs = apiCbs; apiCbs = [];
+    cbs.forEach(function (cb) { cb(); });
+  };
+  function createPlayer(play) {
+    wantPlay = play;
+    player = new YT.Player('music-player', {
+      videoId: TRACKS[0],
+      playerVars: { playlist: TRACKS.slice(1).join(','), loop: 1, rel: 0, modestbranding: 1 },
+      events: {
+        onReady: function () { if (wantPlay) player.playVideo(); },
+        onStateChange: function (e) {
+          // Fallback: if a video ends without auto-advancing, step to the
+          // next track in the list by hand (wraps back to the theme).
+          if (e.data !== YT.PlayerState.ENDED) return;
+          try {
+            var cur = player.getVideoData().video_id;
+            var i = TRACKS.indexOf(cur);
+            player.loadVideoById(TRACKS[(i + 1) % TRACKS.length]);
+          } catch (err) { try { player.nextVideo(); } catch (e2) {} }
+        }
+      }
+    });
+  }
+  function turnOn(play) {
+    setUI(true); save('on');
+    if (player) { if (play) player.playVideo(); return; }
+    loadApi(function () { createPlayer(play); });
+  }
+  function turnOff() {
+    setUI(false); save('off');
+    if (player) player.pauseVideo();
+  }
+  toggle.addEventListener('click', function () {
+    var isOn = toggle.getAttribute('aria-checked') === 'true';
+    if (isOn) turnOff(); else turnOn(true);
+  });
+  // Remembered choice: show On and cue the player (paused, silent) — no autoplay.
+  if (stored() === 'on') {
+    setUI(true);
+    loadApi(function () { createPlayer(false); });
+  }
+})();
 </script>
 <script>
 // Anonymous visit counter — no cookies, no personal data.

@@ -6,7 +6,7 @@
 <title>Dispute helper — put your side together | DotToDotDollars</title>
 <meta name="description" content="A free helper that puts your side of a dispute together in plain words — what was agreed, what happened, what proof you have — so you can challenge a decision. Nothing is sent anywhere by itself.">
 <style>
-  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --gold: #d29922; --card: #161b22; --border: #30363d; }
+  :root { --bg: #4a256e; --fg: #f5f0ff; --muted: #c9b8e0; --accent: #8ab4ff; --gold: #f2c94c; --card: #3a1d5a; --border: #7a5ab0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
   .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
@@ -20,8 +20,9 @@
   label { display: block; margin-bottom: 16px; font-size: 0.95rem; }
   input, select, textarea { width: 100%; margin-top: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #161b22; color: var(--fg); font-size: 1rem; font-family: inherit; }
   textarea { min-height: 110px; }
-  button { width: 100%; background: var(--accent); color: #fff; border: none; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; cursor: pointer; }
-  button.secondary { background: transparent; border: 1px solid var(--gold); color: var(--gold); margin-top: 12px; }
+  button { width: 100%; background: #222d3a; color: #fff; border: none; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; cursor: pointer; }
+  button.secondary, a.secondary { background: transparent; border: 1px solid var(--gold); color: var(--gold); margin-top: 12px; }
+  a.secondary { display: block; text-align: center; text-decoration: none; padding: 16px; border-radius: 8px; font-weight: 700; font-size: 1.15rem; }
   #draft { white-space: pre-wrap; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; color: var(--fg); display: none; margin-top: 16px; }
   footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
   footer a { color: var(--accent); }
@@ -35,7 +36,7 @@
 </header>
 
 <section>
-  <p><strong>This is not a lawyer, and it is not legal advice.</strong> It is a free helper that turns what you tell it into a clear, calm draft. Nothing you type here is sent anywhere. The draft stays on your phone or computer until you copy it and send it yourself. Read it, fix anything that is wrong, and only send what is true.</p>
+  <p><strong>This is not a lawyer, and it is not legal advice.</strong> It is a free helper that turns what you tell it into a clear, calm draft. Nothing you type here is sent anywhere — the draft stays on your device. The site only counts that the page was visited. Read it, fix anything that is wrong, and only send what is true.</p>
   <form id="dispute-form">
     <label>What kind of dispute is this?
       <select id="kind">
@@ -73,6 +74,8 @@
   </form>
   <div id="draft"></div>
   <button class="secondary" id="copy-btn" style="display:none;">Copy my draft</button>
+  <button class="secondary" id="download-btn" style="display:none;">Download draft (.txt)</button>
+  <a class="secondary" id="email-btn" style="display:none;" href="#">Send draft by email</a>
   <p id="copy-msg" style="text-align:center; color:var(--gold); min-height:1.5em;"></p>
 </section>
 
@@ -85,6 +88,7 @@
   <p>If the decision is about a job on this site, see our <a href="/fairness">fair-play promise</a>: you get the reason, and you get to answer back. If you want a person to help you write or send it, see <a href="/legal-help-spokane">legal help in Spokane</a>.</p>
 </section>
 
+<p style="text-align:center; margin-top:24px;"><a href="/">Back to the homepage →</a></p>
 <footer>
   <a href="/">DotToDotDollars</a> — the Triple Thumbs Up Mindset project. Serving Spokane &amp; Coeur d'Alene.
 </footer>
@@ -107,7 +111,23 @@ document.getElementById('dispute-form').addEventListener('submit', function (e) 
   box.textContent = draft;
   box.style.display = 'block';
   document.getElementById('copy-btn').style.display = 'block';
+  document.getElementById('download-btn').style.display = 'block';
+  var emailBtn = document.getElementById('email-btn');
+  emailBtn.style.display = 'block';
+  emailBtn.href = 'mailto:dottodotdollars@gmail.com?subject=' + encodeURIComponent('Dispute draft for the club') + '&body=' + encodeURIComponent(draft);
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.getElementById('download-btn').addEventListener('click', function () {
+  var text = document.getElementById('draft').textContent;
+  var blob = new Blob([text], { type: 'text/plain' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dispute-draft.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  document.getElementById('copy-msg').textContent = 'Downloaded — check your downloads for dispute-draft.txt.';
 });
 document.getElementById('copy-btn').addEventListener('click', async function () {
   var text = document.getElementById('draft').textContent;
