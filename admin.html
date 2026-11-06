@@ -55,7 +55,8 @@
 
 <section>
   <h2>Bad-behavior reports</h2>
-  <p>Not built yet — this fills in when the chat room launches.</p>
+  <p>Chat room reports. One strike: delete the message and ban the sender — no warnings. Newest first.</p>
+  <div id="reports-list"></div>
 </section>
 
 <footer>
@@ -107,6 +108,28 @@
     statusEl.textContent = '';
     var sug = data.suggestions || [];
     var bugs = data.bug_reports || [];
+    var reports = data.chat_reports || [];
+    document.getElementById('reports-list').innerHTML = reports.length
+      ? reports.map(function (r) {
+          var handled = !!r.handled_at;
+          var who = r.message_tag ? '@' + r.message_tag : (r.message_name || 'Guest');
+          return '<div class="item' + (handled ? ' read' : '') + '">'
+            + '<p class="text">' + esc(r.message_text || '(message deleted)') + '</p>'
+            + '<p class="meta">' + [
+                'From: ' + who,
+                r.reason ? 'Report: ' + r.reason : '',
+                r.reporter_name ? 'Reported by: ' + r.reporter_name : '',
+                fmtDate(r.created_at)
+              ].filter(Boolean).map(esc).join(' · ') + '</p>'
+            + '<div class="actions">'
+            + (handled
+                ? '<span class="read-label">Handled</span>'
+                : '<button data-chat-action="ban" data-id="' + esc(r.message_id) + '">Delete + ban sender (one strike)</button>'
+                  + '<button data-chat-action="delete" data-id="' + esc(r.message_id) + '">Delete message only</button>'
+                  + '<button data-chat-action="dismiss" data-id="' + esc(r.id) + '">Dismiss report</button>')
+            + '</div></div>';
+        }).join('')
+      : '<p class="empty">Nothing here yet.</p>';
     document.getElementById('suggestions-list').innerHTML = sug.length
       ? sug.map(function (r) {
           return itemHtml('suggestion', r, [
@@ -131,6 +154,35 @@
       : '<p class="empty">Nothing here yet.</p>';
   }
   document.addEventListener('click', async function (e) {
+    var chatBtn = e.target.closest('button[data-chat-action]');
+    if (chatBtn) {
+      var chatAction = chatBtn.getAttribute('data-chat-action');
+      var chatId = chatBtn.getAttribute('data-id');
+      var endpoint = chatAction === 'ban' ? 'chat/ban'
+        : chatAction === 'delete' ? 'chat/delete' : 'chat/dismiss-report';
+      var body = chatAction === 'dismiss' ? { id: chatId } : { message_id: chatId };
+      if (chatAction === 'ban' && !confirm('One strike — delete this message and ban the sender for good?')) return;
+      if (chatAction === 'delete' && !confirm('Delete this message?')) return;
+      chatBtn.disabled = true;
+      try {
+        var res2 = await fetch('/v1/admin/' + endpoint + '?key=' + encodeURIComponent(key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!res2.ok) {
+          var err2 = await res2.json().catch(function () { return {}; });
+          statusEl.textContent = err2.error || 'Something went wrong — please try again.';
+          chatBtn.disabled = false;
+          return;
+        }
+        await load();
+      } catch (err3) {
+        statusEl.textContent = 'Something went wrong — please try again in a few minutes.';
+        chatBtn.disabled = false;
+      }
+      return;
+    }
     var btn = e.target.closest('button[data-action]');
     if (!btn) return;
     var action = btn.getAttribute('data-action');

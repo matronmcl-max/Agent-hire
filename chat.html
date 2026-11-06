@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat room | DotToDotDollars</title>
+<meta name="description" content="DotToDotDollars is the Triple Thumbs Up Mindset project — Gratitude, Responsibility, Optimistic Action. A community hub where people help each other get ahead: find work, find help, share resources, and connect, one dot at a time.">
+<style>
+  :root { --bg: #4a256e; --fg: #f5f0ff; --muted: #c9b8e0; --blue: #8ab4ff; --gold: #f2c94c; --red: #ff0000; --card: #3a1d5a; --border: #7a5ab0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 48px 0 24px; text-align: center; }
+  header h1 { font-size: 2rem; letter-spacing: -1px; margin-bottom: 12px; }
+  header p { color: var(--muted); font-size: 1.05rem; }
+  .rules { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin: 16px 0 24px; }
+  .rules strong { color: var(--gold); }
+  #messages { min-height: 200px; margin-bottom: 24px; }
+  .msg { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
+  .msg .who { font-weight: 700; margin-bottom: 4px; }
+  .msg .who .tag { color: var(--gold); }
+  .msg .who .guest { color: var(--muted); font-weight: 400; }
+  .msg .when { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+  .msg .text { margin-bottom: 8px; overflow-wrap: anywhere; }
+  .msg .report { background: none; border: none; color: var(--muted); font-size: 0.85rem; cursor: pointer; padding: 0; text-decoration: underline; }
+  .msg .report:hover { color: var(--fg); }
+  .empty { color: var(--muted); text-align: center; padding: 32px 0; }
+  form { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+  form label { display: block; font-weight: 700; margin: 12px 0 4px; }
+  form label:first-child { margin-top: 0; }
+  form input, form textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 1rem; font-family: inherit; }
+  form textarea { min-height: 90px; resize: vertical; }
+  form .hint { color: var(--muted); font-size: 0.9rem; font-weight: 400; }
+  form button { background: #222d3a; color: #fff; border: none; padding: 14px 24px; border-radius: 8px; font-weight: 700; font-size: 1rem; cursor: pointer; margin-top: 16px; width: 100%; }
+  form button:hover { opacity: 0.9; }
+  #status { text-align: center; color: var(--gold); min-height: 1.5em; margin-bottom: 16px; }
+  footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>💬 Chat room</h1>
+  <p>One big room, open to anyone. Visitors post as Guest, members post with their @tag.</p>
+</header>
+
+<div class="rules">
+  <strong>House rules — read this first:</strong> Be decent. Mat moderates this room himself — <strong>zero tolerance, no warnings, one strike and you're out.</strong> If someone breaks the rules, tap Report under their message and Mat will deal with it.
+</div>
+
+<div id="messages"><p class="empty">Loading…</p></div>
+
+<form id="chat-form">
+  <label>Your name <span class="hint">(optional — leave it blank to post as Guest)</span></label>
+  <input id="chat-name" type="text" maxlength="40" placeholder="Guest" autocomplete="off">
+  <label>Member @tag <span class="hint">(optional — only if you joined the club and have a tag)</span></label>
+  <input id="chat-tag" type="text" maxlength="40" placeholder="@yourtag" autocomplete="off">
+  <label>Message</label>
+  <textarea id="chat-text" maxlength="1000" placeholder="Say something…" required></textarea>
+  <button type="submit">Send</button>
+</form>
+
+<p id="status"></p>
+
+<footer>
+  <a href="/">DotToDotDollars</a> — the Triple Thumbs Up Mindset project.<br>
+  Gratitude · Responsibility · Optimistic Action.
+</footer>
+</div>
+<script>
+(function () {
+  var listEl = document.getElementById('messages');
+  var statusEl = document.getElementById('status');
+  var lastCount = -1;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fmtDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+  }
+  async function load() {
+    var res;
+    try {
+      res = await fetch('/v1/chat/messages');
+    } catch (e) {
+      if (lastCount < 0) listEl.innerHTML = '<p class="empty">Could not load the chat — check your connection and try again.</p>';
+      return;
+    }
+    if (!res.ok) return;
+    var data = await res.json();
+    var msgs = data.messages || [];
+    if (msgs.length === lastCount) return;
+    lastCount = msgs.length;
+    if (!msgs.length) {
+      listEl.innerHTML = '<p class="empty">No messages yet — be the first to say hello.</p>';
+      return;
+    }
+    listEl.innerHTML = msgs.map(function (m) {
+      var who = m.is_member
+        ? '<span class="tag">' + esc(m.display_name) + '</span> <span class="guest">member</span>'
+        : esc(m.display_name) + ' <span class="guest">Guest</span>';
+      return '<div class="msg">'
+        + '<p class="who">' + who + ' <span class="when">' + esc(fmtDate(m.created_at)) + '</span></p>'
+        + '<p class="text">' + esc(m.text) + '</p>'
+        + '<button class="report" data-id="' + esc(m.id) + '">Report this message</button>'
+        + '</div>';
+    }).join('');
+  }
+  document.getElementById('chat-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var name = document.getElementById('chat-name').value.trim();
+    var tag = document.getElementById('chat-tag').value.trim();
+    var text = document.getElementById('chat-text').value.trim();
+    if (!text) return;
+    statusEl.textContent = 'Sending…';
+    try {
+      var res = await fetch('/v1/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, tag: tag, text: text })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.error || 'Something went wrong');
+      document.getElementById('chat-text').value = '';
+      statusEl.textContent = 'Sent.';
+      lastCount = -1;
+      await load();
+    } catch (err) {
+      statusEl.textContent = (err && err.message) || 'Hmm, that didn\u2019t go through — try again in a bit.';
+    }
+  });
+  document.addEventListener('click', async function (e) {
+    var btn = e.target.closest('button.report');
+    if (!btn) return;
+    var reason = prompt('What is wrong with this message? (optional — Mat will see it)');
+    if (reason === null) return;
+    btn.disabled = true;
+    try {
+      var res = await fetch('/v1/chat/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: btn.getAttribute('data-id'), reason: reason || '' })
+      });
+      if (!res.ok) throw new Error('report failed');
+      statusEl.textContent = 'Reported — Mat will look at it.';
+    } catch (err) {
+      statusEl.textContent = 'That report didn\u2019t go through — try again in a bit.';
+      btn.disabled = false;
+    }
+  });
+  load();
+  setInterval(load, 5000);
+})();
+</script>
+</body>
+</html>

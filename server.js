@@ -279,6 +279,36 @@ const SCHEMA = [
     created_at TEXT NOT NULL,
     read_at TEXT DEFAULT ''
   )`,
+  // Chat room (Nov 6 2026): one big room, open to anyone. Visitors
+  // post as Guest; members post with their @tag (verified against
+  // the members table). Messages are public; sender IPs are stored
+  // only as a SHA-256 hash, for the one-strike ban. Reports land
+  // privately for Mat in the admin inbox — never public.
+  `CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    tag TEXT DEFAULT '',
+    is_member INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL,
+    ip_hash TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    deleted_at TEXT DEFAULT ''
+  )`,
+  `CREATE TABLE IF NOT EXISTS chat_reports (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    reason TEXT DEFAULT '',
+    reporter_name TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    handled_at TEXT DEFAULT ''
+  )`,
+  `CREATE TABLE IF NOT EXISTS chat_bans (
+    id TEXT PRIMARY KEY,
+    ip_hash TEXT NOT NULL,
+    name_key TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+  )`,
 ];
 
 // One-time migration: whole dollars -> integer cents (Nov 6 2026).
@@ -1289,6 +1319,73 @@ app.post('/v1/bug-reports', rateLimit('bug-reports'), async (req, res, next) => 
   } catch (e) { next(e); }
 });
 
+// ---------- Chat room (Nov 6 2026) ----------
+// One big room, open to anyone — no join required. Visitors post as
+// Guest; a member posts with their @tag, verified against the members
+// table (a tag that isn't a real member tag is rejected, so nobody
+// can impersonate a member). Messages are public; the only thing
+// stored about a sender is a SHA-256 hash of their IP, used only for
+// the one-strike ban. No real names or contacts are ever shown.
+// Moderation is Mat's call, zero tolerance, no warnings: anyone can
+// report a message, Mat sees it in /admin, and one strike deletes
+// the message and bans the sender. Mica can READ the public room
+// (same as any visitor) and flag things to Mat, but cannot delete
+// or ban — those actions need the secret ADMIN_KEY, which Mica does
+// not have.
+function chatIpHash(req) {
+  const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+  return crypto.createHash('sha256').update(String(ip)).digest('hex');
+}
+app.get('/v1/chat/messages', async (req, res, next) => {
+  try {
+    const rows = await dbAll(`SELECT id, display_name, tag, is_member, text, created_at
+                              FROM chat_messages WHERE deleted_at = ''
+                              ORDER BY created_at ASC LIMIT 100`);
+    res.json({ messages: rows });
+  } catch (e) { next(e); }
+});
+app.post('/v1/chat/messages', rateLimit('chat'), async (req, res, next) => {
+  try {
+    const { name = '', tag = '', text } = req.body || {};
+    const body = String(text || '').trim();
+    if (!body) return res.status(400).json({ error: 'Write something first.' });
+    if (body.length > 1000) return res.status(400).json({ error: 'Keep it under 1000 characters.' });
+    const ipHash = chatIpHash(req);
+    const banned = await dbGet('SELECT * FROM chat_bans WHERE ip_hash = ?', [ipHash]);
+    if (banned) return res.status(403).json({ error: 'You can no longer post in the chat room.' });
+    let displayName = 'Guest', tagOut = '', isMember = 0;
+    const tagClean = String(tag || '').trim().replace(/^@/, '');
+    if (tagClean) {
+      const member = await dbGet('SELECT * FROM members WHERE LOWER(username) = ? LIMIT 1', [tagClean.toLowerCase()]);
+      if (!member) return res.status(400).json({ error: 'That @tag is not a member tag — post as Guest, or check your tag.' });
+      displayName = '@' + member.username;
+      tagOut = member.username;
+      isMember = 1;
+    } else {
+      const n = String(name || '').trim().slice(0, 40);
+      if (n) displayName = n;
+    }
+    const row = { id: uid('chat'), display_name: displayName, tag: tagOut, is_member: isMember,
+                  text: body.slice(0, 1000), ip_hash: ipHash, created_at: now() };
+    await dbRun('INSERT INTO chat_messages (id, display_name, tag, is_member, text, ip_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [row.id, row.display_name, row.tag, row.is_member, row.text, row.ip_hash, row.created_at]);
+    res.status(201).json({ ok: true, message_id: row.id });
+  } catch (e) { next(e); }
+});
+app.post('/v1/chat/reports', rateLimit('chat-reports'), async (req, res, next) => {
+  try {
+    const { message_id, reason = '', reporter_name = '' } = req.body || {};
+    if (!message_id) return res.status(400).json({ error: 'message_id is required' });
+    const msg = await dbGet('SELECT * FROM chat_messages WHERE id = ?', [String(message_id)]);
+    if (!msg) return res.status(404).json({ error: 'That message is not there anymore.' });
+    const row = { id: uid('rep'), message_id: String(message_id), reason: String(reason).trim().slice(0, 500),
+                  reporter_name: String(reporter_name).trim().slice(0, 40), created_at: now() };
+    await dbRun('INSERT INTO chat_reports (id, message_id, reason, reporter_name, created_at) VALUES (?, ?, ?, ?, ?)',
+                [row.id, row.message_id, row.reason, row.reporter_name, row.created_at]);
+    res.status(201).json({ ok: true, report_id: row.id });
+  } catch (e) { next(e); }
+});
+
 // Admin inbox API (key-gated, see requireAdminKey above). Contacts
 // from suggestions/bug reports are shown here — and ONLY here, with
 // the key. No public route ever exposes them.
@@ -1297,7 +1394,51 @@ app.get('/v1/admin/inbox', async (req, res, next) => {
     if (!requireAdminKey(req, res)) return;
     const suggestions = await dbAll('SELECT * FROM suggestions ORDER BY created_at DESC');
     const bug_reports = await dbAll('SELECT * FROM bug_reports ORDER BY created_at DESC');
-    res.json({ suggestions, bug_reports });
+    const chat_reports = await dbAll(`SELECT r.*, m.display_name AS message_name, m.tag AS message_tag,
+      m.text AS message_text, m.created_at AS message_created_at
+      FROM chat_reports r LEFT JOIN chat_messages m ON m.id = r.message_id
+      ORDER BY r.created_at DESC`);
+    res.json({ suggestions, bug_reports, chat_reports });
+  } catch (e) { next(e); }
+});
+// Chat moderation (key-gated, Mat only — zero tolerance, one strike):
+// delete a message, or delete it AND ban its sender for good.
+// A ban is by the sender's IP hash, so a banned Guest cannot just
+// re-post under a new name from the same connection.
+app.post('/v1/admin/chat/delete', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const { message_id } = req.body || {};
+    if (!message_id) return res.status(400).json({ error: 'message_id is required' });
+    await dbRun('UPDATE chat_messages SET deleted_at = ? WHERE id = ?', [now(), String(message_id)]);
+    await dbRun('UPDATE chat_reports SET handled_at = ? WHERE message_id = ?', [now(), String(message_id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+app.post('/v1/admin/chat/ban', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const { message_id, reason = '' } = req.body || {};
+    if (!message_id) return res.status(400).json({ error: 'message_id is required' });
+    const msg = await dbGet('SELECT * FROM chat_messages WHERE id = ?', [String(message_id)]);
+    if (!msg) return res.status(404).json({ error: 'That message is not there anymore.' });
+    await dbRun('UPDATE chat_messages SET deleted_at = ? WHERE id = ?', [now(), String(message_id)]);
+    await dbRun('UPDATE chat_reports SET handled_at = ? WHERE message_id = ?', [now(), String(message_id)]);
+    if (msg.ip_hash) {
+      await dbRun('INSERT INTO chat_bans (id, ip_hash, name_key, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+                  [uid('ban'), msg.ip_hash, String(msg.tag || msg.display_name || '').slice(0, 80),
+                   String(reason).trim().slice(0, 500) || 'One strike — banned by Mat', now()]);
+    }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+app.post('/v1/admin/chat/dismiss-report', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    await dbRun('UPDATE chat_reports SET handled_at = ? WHERE id = ?', [now(), String(id)]);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 const ADMIN_INBOX_TABLES = { suggestion: 'suggestions', bug: 'bug_reports' };
@@ -1640,6 +1781,7 @@ app.get('/legal-help-spokane', (req, res) => res.sendFile(path.join(__dirname, '
 app.get('/know-your-rights', (req, res) => res.sendFile(path.join(__dirname, 'know-your-rights.html')));
 app.get('/suggestions', (req, res) => res.sendFile(path.join(__dirname, 'suggestions.html')));
 app.get('/bug-report', (req, res) => res.sendFile(path.join(__dirname, 'bug-report.html')));
+app.get('/chat', (req, res) => res.sendFile(path.join(__dirname, 'chat.html')));
 
 // Private admin inbox (key-gated, see requireAdminKey). Not linked
 // from any public page, not in the sitemap, noindex/nofollow.
