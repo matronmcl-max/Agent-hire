@@ -15,6 +15,10 @@
   header p { color: var(--muted); font-size: 1.15rem; }
   header p.author { color: var(--fg); font-size: 1.05rem; margin-top: 16px; }
   header p.intent { color: var(--fg); font-size: 1.05rem; font-style: italic; margin-top: 8px; }
+  .listen { text-align: center; margin-top: 20px; }
+  .listen audio { width: 100%; max-width: 480px; }
+  .listen p { font-size: 0.95rem; margin-top: 8px; }
+  .listen a { color: var(--accent); }
   section { padding: 36px 0; border-top: 1px solid var(--border); }
   h2 { font-size: 1.4rem; margin-bottom: 16px; }
   h3 { font-size: 1.15rem; margin: 24px 0 8px; color: var(--fg); }
@@ -44,6 +48,13 @@
   <p class="author"><strong>Author: Mathew Ronald McLean (Mat)</strong></p>
   <p class="intent">I am writing this not just in my own voice, but in the voice of all the sufferers.</p>
   <p class="dedication">Dedicated to my daughter, Lydia May McLean.<br>With special consideration to my mother for her support and love.</p>
+  <div class="listen">
+    <p><strong>Listen to the report</strong></p>
+    <audio controls preload="none" src="/addiction-treatment-report-audio">
+      Your browser does not support the audio player.
+    </audio>
+    <p><a href="/addiction-treatment-report-audio" download>Download the audio (MP3)</a></p>
+  </div>
 </header>
 
 <section>
