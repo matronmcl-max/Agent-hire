@@ -13,8 +13,8 @@
   .posting-as label { font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; }
   .posting-as input { width: 140px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 0.95rem; font-family: inherit; }
   .chat-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #2a1545; border-top: 3px solid #f2c94c; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 10; }
-  .chat-bar input { flex: 1; padding: 14px; border-radius: 24px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 1.05rem; font-family: inherit; min-width: 0; }
-  .chat-bar button { background: #ff0000; color: #fff; border: none; padding: 14px 22px; border-radius: 24px; font-weight: 700; font-size: 1rem; cursor: pointer; white-space: nowrap; }
+  form.chat-bar input { flex: 1 1 auto; width: auto; min-width: 0; padding: 14px; border-radius: 24px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 1.05rem; font-family: inherit; }
+  form.chat-bar button { flex: 0 0 auto; width: auto; margin-top: 0; background: #ff0000; color: #fff; border: none; padding: 14px 22px; border-radius: 24px; font-weight: 700; font-size: 1rem; cursor: pointer; white-space: nowrap; }
   .chat-bar button:hover { opacity: 0.9; }
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
   header { padding: 48px 0 24px; text-align: center; }
