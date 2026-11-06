@@ -169,6 +169,9 @@ const SCHEMA = [
     manage_code TEXT,
     claim_code TEXT,
     claim_contact TEXT DEFAULT '',
+    is_new_member INTEGER NOT NULL DEFAULT 0,
+    new_member_until TEXT DEFAULT '',
+    new_member_label TEXT DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(id),
     FOREIGN KEY (worker_id) REFERENCES workers(id)
   )`,
@@ -236,7 +239,10 @@ const SCHEMA = [
     location TEXT DEFAULT '',
     contact TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'open',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    is_new_member INTEGER NOT NULL DEFAULT 0,
+    new_member_until TEXT DEFAULT '',
+    new_member_label TEXT DEFAULT ''
   )`,
   // Bids / counter-offers on a job. One open bid per worker per job;
   // a new bid replaces their old open one. status: open | accepted | declined
@@ -333,6 +339,15 @@ async function initSchema() {
     'ALTER TABLE jobs ADD COLUMN manage_code TEXT',
     'ALTER TABLE jobs ADD COLUMN claim_code TEXT',
     "ALTER TABLE jobs ADD COLUMN claim_contact TEXT DEFAULT ''",
+    // New-member gratitude highlight (Nov 6 2026): flag + window end +
+    // badge label stored at post time; GET endpoints recompute the
+    // live status from new_member_until so expiry is automatic.
+    'ALTER TABLE jobs ADD COLUMN is_new_member INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE jobs ADD COLUMN new_member_until TEXT DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN new_member_label TEXT DEFAULT ''",
+    'ALTER TABLE board_posts ADD COLUMN is_new_member INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE board_posts ADD COLUMN new_member_until TEXT DEFAULT ''",
+    "ALTER TABLE board_posts ADD COLUMN new_member_label TEXT DEFAULT ''",
   ]) { try { await dbRun(col); } catch (_) {} }
   // Money moved to integer cents (see migrateMoneyToCents above).
   await migrateMoneyToCents();
@@ -360,6 +375,44 @@ function codesEqual(a, b) {
   const bb = Buffer.from(b);
   if (ba.length !== bb.length) return false;
   return crypto.timingSafeEqual(ba, bb);
+}
+
+// ---------- New-member gratitude highlight (Nov 6 2026) ----------
+// A member is "new" for their first 30 days after joining. Their job
+// and bulletin-board posts get a "New — joined Mon YYYY" badge and
+// sort to the top of the lists. The window runs from the FIRST join
+// only: re-joining never restarts it. Matching is by contact (trimmed,
+// case-insensitive) — the human-jobs form collects contact, not name,
+// so contact is the identifier that both post forms share. The badge
+// is only ever attached to a post the member made; there is NO public
+// member list (GET /v1/members stays deleted) and no member names or
+// contacts are published anywhere.
+const NEW_MEMBER_DAYS = 30;
+function normContact(c) { return String(c || '').trim().toLowerCase(); }
+async function earliestMemberByContact(contact) {
+  const n = normContact(contact);
+  if (!n) return null;
+  return dbGet(`SELECT * FROM members WHERE LOWER(TRIM(contact)) = ? ORDER BY created_at ASC LIMIT 1`, [n]);
+}
+// If this member is still inside their first 30 days, the badge window
+// for a post they make now. Returns null once the 30 days are up.
+function newMemberWindow(member) {
+  if (!member || !member.created_at) return null;
+  const joined = new Date(member.created_at);
+  if (isNaN(joined.getTime())) return null;
+  const until = new Date(joined.getTime() + NEW_MEMBER_DAYS * 24 * 60 * 60 * 1000);
+  if (until <= new Date()) return null;
+  const label = 'New — joined ' + joined.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  return { until: until.toISOString(), label };
+}
+// Live badge status for a stored row: the stored flag says the poster
+// WAS new when they posted; the window end says whether they still are.
+// Expiry is automatic — no cron, no manual removal.
+function withNewMember(row) {
+  if (!row) return row;
+  const live = Boolean(row.is_new_member) && row.new_member_until && row.new_member_until > now();
+  return { ...row, is_new_member: live, new_member_until: live ? row.new_member_until : null,
+           new_member_label: live ? (row.new_member_label || 'New member') : null };
 }
 
 // ---------- Rate limiting (in-memory, per IP, per endpoint) ----------
@@ -576,6 +629,11 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
       pay = payout * CENTS_PER_DOLLAR;
     }
     const fee = mode === 'open_bid' ? 0 : feeForCents(pay);
+    // New-member highlight: if the poster's contact belongs to a member
+    // still inside their first 30 days, this job carries the badge and
+    // sorts to the top of Open jobs.
+    const member = await earliestMemberByContact(contact);
+    const win = newMemberWindow(member);
     // jobs.agent_id has a foreign key to agents(id), so the website
     // form needs a real agent row to attach to. It holds no credits
     // and has no usable api_key — humans post here, not through the MCP.
@@ -587,11 +645,13 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
                   description: String(description).trim().slice(0, 500),
                   payout: pay, fee, location: String(location).trim().slice(0, 120),
                   contact: String(contact).trim().slice(0, 120),
-                  status: 'open', pricing_mode: mode, manage_code, created_at: now() };
-    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, manage_code, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 0, ?, ?)`,
+                  status: 'open', pricing_mode: mode, manage_code, created_at: now(),
+                  is_new_member: win ? 1 : 0, new_member_until: win ? win.until : '', new_member_label: win ? win.label : '' };
+    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, manage_code, created_at, is_new_member, new_member_until, new_member_label)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, ?, ?)`,
       [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
-       job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at]);
+       job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at,
+       job.is_new_member, job.new_member_until, job.new_member_label]);
     const { contact: _contact, ...jobOut } = job;
     res.status(201).json({ ...withSplit(jobOut), escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts. The 7% fee is split evenly: on a $100 job the poster pays $103.50 and the worker gets $96.50.' });
   } catch (e) { next(e); }
@@ -706,18 +766,30 @@ app.post('/v1/board', rateLimit('board'), async (req, res, next) => {
                    location: String(location).trim().slice(0, 120),
                    contact: String(contact).trim().slice(0, 120),
                    status: 'open', created_at: now() };
-    await dbRun(`INSERT INTO board_posts (id, name, kind, title, description, price, location, contact, status, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
-      [post.id, post.name, post.kind, post.title, post.description, post.price, post.location, post.contact, post.created_at]);
+    // New-member highlight: same 30-day window as jobs — a seeking,
+    // sell, buy or other post by a new member carries the badge and
+    // sorts to the top of the board.
+    const member = await earliestMemberByContact(post.contact);
+    const win = newMemberWindow(member);
+    post.is_new_member = win ? 1 : 0;
+    post.new_member_until = win ? win.until : '';
+    post.new_member_label = win ? win.label : '';
+    await dbRun(`INSERT INTO board_posts (id, name, kind, title, description, price, location, contact, status, created_at, is_new_member, new_member_until, new_member_label)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
+      [post.id, post.name, post.kind, post.title, post.description, post.price, post.location, post.contact, post.created_at,
+       post.is_new_member, post.new_member_until, post.new_member_label]);
     const { contact: _contact, ...postOut } = post;
     res.status(201).json(postOut);
   } catch (e) { next(e); }
 });
 app.get('/v1/board', async (req, res, next) => {
   try {
-    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, status, created_at
-                               FROM board_posts WHERE status = 'open' ORDER BY created_at DESC`);
-    res.json({ board: posts });
+    // New-member posts first (their window still open), then newest first.
+    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, status, created_at,
+                               is_new_member, new_member_until, new_member_label
+                               FROM board_posts WHERE status = 'open'
+                               ORDER BY (new_member_until > ?) DESC, created_at DESC`, [now()]);
+    res.json({ board: posts.map(withNewMember) });
   } catch (e) { next(e); }
 });
 app.post('/v1/board/:id/contact', rateLimit('board-contact'), async (req, res, next) => {
@@ -745,9 +817,11 @@ app.post('/v1/board/:id/contact', rateLimit('board-contact'), async (req, res, n
 app.get('/v1/jobs', async (req, res, next) => {
   try {
     const status = req.query.status || 'open';
-    const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, pricing_mode, created_at
-                             FROM jobs WHERE status = ? ORDER BY created_at DESC`, [status]);
-    res.json({ jobs: jobs.map(withSplit) });
+    // New-member posts first (their window still open), then newest first.
+    const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, pricing_mode, created_at,
+                             is_new_member, new_member_until, new_member_label
+                             FROM jobs WHERE status = ? ORDER BY (new_member_until > ?) DESC, created_at DESC`, [status, now()]);
+    res.json({ jobs: jobs.map(withNewMember).map(withSplit) });
   } catch (e) { next(e); }
 });
 
@@ -985,9 +1059,20 @@ app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
     if (!contact || !String(contact).trim()) return res.status(400).json({ error: 'contact is required' });
     const member = { id: uid('mem'), name: String(name).trim().slice(0, 80),
                      contact: String(contact).trim().slice(0, 120), created_at: now() };
+    // Anti-gaming: if this contact already joined, keep the FIRST join
+    // — do not insert a second row and do not restart the 30-day
+    // new-member window. The earliest created_at is the only one that counts.
+    const existing = await earliestMemberByContact(member.contact);
+    if (existing) {
+      const win = newMemberWindow(existing);
+      return res.status(201).json({ ok: true, member_id: existing.id, joined_at: existing.created_at,
+                                    already_member: true, new_member_until: win ? win.until : null });
+    }
     await dbRun('INSERT INTO members (id, name, contact, created_at) VALUES (?, ?, ?, ?)',
                 [member.id, member.name, member.contact, member.created_at]);
-    res.status(201).json({ ok: true, member_id: member.id });
+    const win = newMemberWindow(member);
+    res.status(201).json({ ok: true, member_id: member.id, joined_at: member.created_at,
+                           new_member_until: win ? win.until : null });
   } catch (e) { next(e); }
 });
 
