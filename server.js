@@ -265,7 +265,8 @@ const SCHEMA = [
     category TEXT DEFAULT '',
     name TEXT DEFAULT '',
     contact TEXT DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    read_at TEXT DEFAULT ''
   )`,
   `CREATE TABLE IF NOT EXISTS bug_reports (
     id TEXT PRIMARY KEY,
@@ -275,7 +276,8 @@ const SCHEMA = [
     device TEXT DEFAULT '',
     name TEXT DEFAULT '',
     contact TEXT DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    read_at TEXT DEFAULT ''
   )`,
 ];
 
@@ -353,6 +355,9 @@ async function initSchema() {
     // case-insensitively (see the unique index below). Existing
     // members keep NULL — no forced change, no migration breakage.
     'ALTER TABLE members ADD COLUMN username TEXT',
+    // Admin inbox (Nov 6 2026): read marker for suggestions/bugs.
+    'ALTER TABLE suggestions ADD COLUMN read_at TEXT DEFAULT \'\'',
+    'ALTER TABLE bug_reports ADD COLUMN read_at TEXT DEFAULT \'\'',
   ]) { try { await dbRun(col); } catch (_) {} }
   // One tag per member, first come first served — case-insensitive.
   // NULLs stay distinct in SQLite, so members without a tag are fine.
@@ -583,6 +588,55 @@ async function posterAuth(req, res, job) {
     return null;
   }
   return { via: 'api_key', agent };
+}
+
+// ---------- Admin inbox (Nov 6 2026) ----------
+// Private inbox so Mat can read visitor suggestions + bug reports,
+// which otherwise land in the DB and nobody can see them. Access is a
+// secret link: the key comes ONLY from the ADMIN_KEY environment
+// variable — there is no default, no generated key, no key in the
+// repo, in a file, or in any log. If ADMIN_KEY is not set, /admin
+// and its API return 403 "Admin is not set up yet" and the feature
+// is simply unusable until the parent sets the variable in Render.
+// Every request must carry ?key=<ADMIN_KEY> (page load and API).
+// Comparison is timing-safe (codesEqual). Wrong/missing key always
+// gets the same generic 403 — never a hint about what was wrong.
+// Failed attempts are rate-limited: 5 per 10 min per IP, then 429.
+// Correct-key requests are not rate-limited for reading.
+// /admin is NOT linked from any public page, NOT in sitemap.xml,
+// NOT in robots.txt, and serves X-Robots-Tag: noindex, nofollow.
+const ADMIN_FAIL_MAX = 5;
+const ADMIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const adminFailBuckets = new Map(); // ip -> { count, resetAt }
+function adminKeySet() {
+  const k = process.env.ADMIN_KEY;
+  return typeof k === 'string' && k.length > 0;
+}
+function adminKeyFrom(req) {
+  const q = req.query && req.query.key;
+  if (typeof q === 'string' && q) return q;
+  const b = req.body && req.body.key;
+  return typeof b === 'string' ? b : '';
+}
+// Returns true when the request carries the valid admin key.
+// On failure it sends the response itself (403 or 429) and returns false.
+function requireAdminKey(req, res) {
+  const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+  if (!adminKeySet()) {
+    return res.status(403).json({ error: 'Admin is not set up yet' }), false;
+  }
+  if (codesEqual(adminKeyFrom(req), process.env.ADMIN_KEY)) return true;
+  const nowMs = Date.now();
+  let bucket = adminFailBuckets.get(ip);
+  if (!bucket || nowMs >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: nowMs + ADMIN_FAIL_WINDOW_MS };
+    adminFailBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > ADMIN_FAIL_MAX) {
+    return res.status(429).json({ error: 'Too many requests — please wait a few minutes and try again.' }), false;
+  }
+  return res.status(403).json({ error: 'Access denied' }), false;
 }
 
 // ---------- Routes ----------
@@ -1235,6 +1289,39 @@ app.post('/v1/bug-reports', rateLimit('bug-reports'), async (req, res, next) => 
   } catch (e) { next(e); }
 });
 
+// Admin inbox API (key-gated, see requireAdminKey above). Contacts
+// from suggestions/bug reports are shown here — and ONLY here, with
+// the key. No public route ever exposes them.
+app.get('/v1/admin/inbox', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const suggestions = await dbAll('SELECT * FROM suggestions ORDER BY created_at DESC');
+    const bug_reports = await dbAll('SELECT * FROM bug_reports ORDER BY created_at DESC');
+    res.json({ suggestions, bug_reports });
+  } catch (e) { next(e); }
+});
+const ADMIN_INBOX_TABLES = { suggestion: 'suggestions', bug: 'bug_reports' };
+app.post('/v1/admin/read', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const { kind, id } = req.body || {};
+    const table = ADMIN_INBOX_TABLES[String(kind)];
+    if (!table || !id) return res.status(400).json({ error: 'kind and id are required' });
+    await dbRun(`UPDATE ${table} SET read_at = ? WHERE id = ?`, [now(), String(id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+app.post('/v1/admin/delete', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const { kind, id } = req.body || {};
+    const table = ADMIN_INBOX_TABLES[String(kind)];
+    if (!table || !id) return res.status(400).json({ error: 'kind and id are required' });
+    await dbRun(`DELETE FROM ${table} WHERE id = ?`, [String(id)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // Anonymous visit counter — logs page views, skips bots. No cookies, no personal data.
 app.post('/v1/hit', rateLimit('hit'), async (req, res, next) => {
   try {
@@ -1551,6 +1638,14 @@ app.get('/legal-help-spokane', (req, res) => res.sendFile(path.join(__dirname, '
 app.get('/know-your-rights', (req, res) => res.sendFile(path.join(__dirname, 'know-your-rights.html')));
 app.get('/suggestions', (req, res) => res.sendFile(path.join(__dirname, 'suggestions.html')));
 app.get('/bug-report', (req, res) => res.sendFile(path.join(__dirname, 'bug-report.html')));
+
+// Private admin inbox (key-gated, see requireAdminKey). Not linked
+// from any public page, not in the sitemap, noindex/nofollow.
+app.get('/admin', (req, res) => {
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  if (!requireAdminKey(req, res)) return;
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
 
 // Bridge solo game, you as South + 3 bots. Engine: bridge-engine (MIT).
 // Hands are persisted to the database (Turso live): a server restart
