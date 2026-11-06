@@ -23,9 +23,29 @@
   .cta a.gold { background: transparent; border: 1px solid var(--gold); color: var(--gold); }
   footer { padding: 32px 0 48px; text-align: center; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
   footer a { color: var(--accent); }
+  /* Music toggle: one switch at the top of the homepage, off by default.
+     Dark slate like the other buttons; gold track when on. */
+  .music-row { text-align: center; padding: 8px 24px 0; }
+  .music-toggle { display: inline-flex; align-items: center; gap: 12px; background: #222d3a; color: #fff; border: 1px solid #3a4a5f; border-radius: 999px; padding: 10px 18px; font-size: 1.05rem; font-weight: 700; cursor: pointer; }
+  .music-toggle:hover { opacity: 0.9; }
+  .music-switch { display: inline-block; width: 46px; height: 26px; border-radius: 999px; background: #555; position: relative; flex: none; }
+  .music-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+  .music-toggle[aria-checked="true"] .music-switch { background: #f2c94c; }
+  .music-toggle[aria-checked="true"] .music-knob { left: 23px; background: #222d3a; }
+  .music-credit { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+  #music-player-wrap { max-width: 320px; margin: 12px auto 0; }
+  #music-player-wrap iframe { width: 100%; height: 180px; border: 0; border-radius: 12px; display: block; }
 </style>
 </head>
 <body>
+<div class="music-row">
+  <button id="music-toggle" class="music-toggle" type="button" role="switch" aria-checked="false">
+    <span id="music-label">Music: Off</span>
+    <span class="music-switch" aria-hidden="true"><span class="music-knob"></span></span>
+  </button>
+  <p class="music-credit">Music: 12 tracks, shuffled — tap to play.</p>
+</div>
+<div id="music-player-wrap" hidden><div id="music-player"></div></div>
 <div class="wrap">
 <header>
   <h1>Meal Prep &amp; Home Cooking in Spokane, WA</h1>
@@ -81,6 +101,87 @@
       fetch('/v1/hit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data, keepalive: true });
     }
   } catch (e) {}
+})();
+</script>
+<script>
+// Background music — Trailer Park Boys theme + 11 more, YouTube embed only.
+// No hosted audio, no autoplay. One toggle at the top: "Music: Off" /
+// "Music: On". Off by default. Choice is remembered in localStorage, but
+// sound always needs a tap each visit: if the last choice was On, the
+// toggle shows On and the player is cued (paused, silent) — tap the
+// player's play button, or flip the toggle off and on, to hear it.
+// Playlist: exactly these 12 tracks, in this order, looped.
+(function () {
+  var TRACKS = ['1F9Y-c9m3p4', '0JP3ddrWc6s', 'aI9_jcN1yIU', 'zHamgwlQ1yo', 'z_Y3mnj-8lA', 'wJJGikSD9ho', 'q_t_G42VHFg', 'GJtTfP2hEHU', 'DkWn69VBslw', 'pt4C8j439IE', '2vTomEuuIZA', '8FIBPKRV3kk'];
+  // Shuffle: a different song starts each visit, and the order is new each time.
+  for (var si = TRACKS.length - 1; si > 0; si--) {
+    var sj = Math.floor(Math.random() * (si + 1));
+    var st = TRACKS[si]; TRACKS[si] = TRACKS[sj]; TRACKS[sj] = st;
+  }
+  var KEY = 'ttum-music';
+  var toggle = document.getElementById('music-toggle');
+  var label = document.getElementById('music-label');
+  var wrap = document.getElementById('music-player-wrap');
+  var player = null, apiReady = false, apiLoading = false, apiCbs = [], wantPlay = false;
+  function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+  function save(v) { try { localStorage.setItem(KEY, v); } catch (e) {} }
+  function setUI(on) {
+    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    label.textContent = on ? 'Music: On' : 'Music: Off';
+    wrap.hidden = !on;
+  }
+  function loadApi(cb) {
+    if (apiReady) { cb(); return; }
+    apiCbs.push(cb);
+    if (apiLoading) return;
+    apiLoading = true;
+    var s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+  window.onYouTubeIframeAPIReady = function () {
+    apiReady = true;
+    var cbs = apiCbs; apiCbs = [];
+    cbs.forEach(function (cb) { cb(); });
+  };
+  function createPlayer(play) {
+    wantPlay = play;
+    player = new YT.Player('music-player', {
+      videoId: TRACKS[0],
+      playerVars: { playlist: TRACKS.slice(1).join(','), loop: 1, rel: 0, modestbranding: 1 },
+      events: {
+        onReady: function () { if (wantPlay) player.playVideo(); },
+        onStateChange: function (e) {
+          // Fallback: if a video ends without auto-advancing, step to the
+          // next track in the list by hand (wraps back to the theme).
+          if (e.data !== YT.PlayerState.ENDED) return;
+          try {
+            var cur = player.getVideoData().video_id;
+            var i = TRACKS.indexOf(cur);
+            player.loadVideoById(TRACKS[(i + 1) % TRACKS.length]);
+          } catch (err) { try { player.nextVideo(); } catch (e2) {} }
+        }
+      }
+    });
+  }
+  function turnOn(play) {
+    setUI(true); save('on');
+    if (player) { if (play) player.playVideo(); return; }
+    loadApi(function () { createPlayer(play); });
+  }
+  function turnOff() {
+    setUI(false); save('off');
+    if (player) player.pauseVideo();
+  }
+  toggle.addEventListener('click', function () {
+    var isOn = toggle.getAttribute('aria-checked') === 'true';
+    if (isOn) turnOff(); else turnOn(true);
+  });
+  // Remembered choice: show On and cue the player (paused, silent) — no autoplay.
+  if (stored() === 'on') {
+    setUI(true);
+    loadApi(function () { createPlayer(false); });
+  }
 })();
 </script>
 </body>
