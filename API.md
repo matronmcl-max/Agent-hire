@@ -49,7 +49,30 @@ arranged with the poster before work starts. Returns a one-time
 ### `GET /v1/jobs?status=open`
 Public job board — what humans browse and claim. No auth needed.
 Includes `location`. Never includes `contact`.
-→ `200 { "jobs": [ { "id", "title", "description", "location", "payout", "status", "created_at" } ] }`
+Each job carries `poster_display`: the poster's public name —
+`@tag` when the poster is a member with a username, else the
+member's first name, or `null` when the poster is not a member.
+→ `200 { "jobs": [ { "id", "title", "description", "location", "payout", "status", "created_at", "poster_display" } ] }`
+
+### `POST /v1/join`
+Club signup from the website form. `name` and `contact` required;
+`contact` stays private and is never posted publicly. Optional
+`username` is a public tag shown on the member's posts instead of
+their real name: 3–20 letters, numbers or underscores, starting
+with a letter, no spaces (stored without the `@`, shown with it).
+Tags are unique case-insensitively — a taken tag returns 400
+`"That tag is already taken — pick another one."` Reserved tags
+(`admin`, `mat`, `dottodotdollars`, `support`, `club`) return 400.
+The tag is set at Join only and cannot be changed through any
+public form; re-joining with the same contact keeps the original
+tag and the original join date (the new-member 30-day window does
+not restart).
+```json
+{ "name": "Sam Rivera", "contact": "sam@example.com", "username": "LeafKing" }
+```
+→ `201 { "ok": true, "member_id": "mem_…", "joined_at": "…", "username": "leafking", "new_member_until": "…" }`
+Board posts carry the same idea as `display_name` on `GET /v1/board`,
+and bids carry `display_name` on `GET /v1/jobs/:id/bids`.
 
 ### `POST /v1/jobs/:id/claim`
 A human claims an open job. (Called by the worker app / website.)

@@ -188,6 +188,7 @@ const SCHEMA = [
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     contact TEXT NOT NULL,
+    username TEXT,
     created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS page_views (
@@ -348,7 +349,14 @@ async function initSchema() {
     'ALTER TABLE board_posts ADD COLUMN is_new_member INTEGER NOT NULL DEFAULT 0',
     "ALTER TABLE board_posts ADD COLUMN new_member_until TEXT DEFAULT ''",
     "ALTER TABLE board_posts ADD COLUMN new_member_label TEXT DEFAULT ''",
+    // Optional username / tag (Nov 6 2026): nullable, unique
+    // case-insensitively (see the unique index below). Existing
+    // members keep NULL — no forced change, no migration breakage.
+    'ALTER TABLE members ADD COLUMN username TEXT',
   ]) { try { await dbRun(col); } catch (_) {} }
+  // One tag per member, first come first served — case-insensitive.
+  // NULLs stay distinct in SQLite, so members without a tag are fine.
+  try { await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_members_username_lower ON members (LOWER(username))'); } catch (_) {}
   // Money moved to integer cents (see migrateMoneyToCents above).
   await migrateMoneyToCents();
   // Backfill escrowed for legacy agent jobs that somehow still show 0
@@ -413,6 +421,63 @@ function withNewMember(row) {
   const live = Boolean(row.is_new_member) && row.new_member_until && row.new_member_until > now();
   return { ...row, is_new_member: live, new_member_until: live ? row.new_member_until : null,
            new_member_label: live ? (row.new_member_label || 'New member') : null };
+}
+
+// ---------- Optional username / tag (Nov 6 2026) ----------
+// Members may pick a public tag at Join (e.g. @LeafKing). It is
+// optional: blank means their first name shows on posts instead.
+// The tag is the public face — the member's real name and contact
+// stay private either way. One tag per person, first come first
+// served; set at Join, never changeable through any public form.
+// Stored WITHOUT the @, shown WITH it. Uniqueness is
+// case-insensitive (@LeafKing and @leafking are the same tag).
+// Reserved words, in one place here: tags that could make a poster
+// look like the site itself (admin, the founder, the club) are refused.
+const RESERVED_USERNAMES = ['admin', 'mat', 'dottodotdollars', 'support', 'club'];
+function normalizeUsername(raw) {
+  return String(raw || '').trim().replace(/^@+/, '').toLowerCase();
+}
+function validateUsername(raw) {
+  const u = normalizeUsername(raw);
+  if (!u) return { ok: true, username: null }; // blank = no tag, fine
+  if (!/^[a-z][a-z0-9_]{2,19}$/.test(u)) {
+    return { ok: false, error: 'Tags are 3–20 letters, numbers or underscores, starting with a letter — no spaces.' };
+  }
+  if (RESERVED_USERNAMES.includes(u)) {
+    return { ok: false, error: 'That tag is reserved — pick another one.' };
+  }
+  return { ok: true, username: u };
+}
+async function usernameTaken(username) {
+  const row = await dbGet('SELECT id FROM members WHERE username IS NOT NULL AND LOWER(username) = ? LIMIT 1', [username]);
+  return !!row;
+}
+function firstName(name) { return String(name || '').trim().split(/\s+/)[0] || ''; }
+// Public name for a member row: '@tag' when they have one, else
+// their first name. fallbackName is the post's own stored name
+// (board posts carry one; human jobs do not, so pass null there).
+function displayFor(member, fallbackName) {
+  if (member && member.username) return '@' + member.username;
+  if (member && member.name) return firstName(member.name);
+  return fallbackName ? firstName(fallbackName) : null;
+}
+// Resolve a post's public display name by the poster's contact — the
+// identifier both post forms share (same matching as the new-member
+// highlight). Never returns contact or a full real name.
+async function displayNameByContact(contact, fallbackName) {
+  const member = await earliestMemberByContact(contact);
+  return displayFor(member, fallbackName);
+}
+// Bidders type only a name (no contact), so matching is by exact full
+// name — and only when exactly one member has that name, so a name
+// shared by two people never shows someone else's tag.
+async function displayNameByName(name) {
+  const n = String(name || '').trim();
+  if (!n) return null;
+  const rows = await dbAll('SELECT * FROM members WHERE LOWER(TRIM(name)) = ? ORDER BY created_at ASC', [n.toLowerCase()]);
+  if (rows.length !== 1) return null;
+  const m = rows[0];
+  return m.username ? '@' + m.username : null;
 }
 
 // ---------- Rate limiting (in-memory, per IP, per endpoint) ----------
@@ -653,7 +718,7 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
        job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at,
        job.is_new_member, job.new_member_until, job.new_member_label]);
     const { contact: _contact, ...jobOut } = job;
-    res.status(201).json({ ...withSplit(jobOut), escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts. The 7% fee is split evenly: on a $100 job the poster pays $103.50 and the worker gets $96.50.' });
+    res.status(201).json({ ...withSplit(jobOut), escrowed: 0, poster_display: displayFor(member, null), payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts. The 7% fee is split evenly: on a $100 job the poster pays $103.50 and the worker gets $96.50.' });
   } catch (e) { next(e); }
 });
 
@@ -779,17 +844,30 @@ app.post('/v1/board', rateLimit('board'), async (req, res, next) => {
       [post.id, post.name, post.kind, post.title, post.description, post.price, post.location, post.contact, post.created_at,
        post.is_new_member, post.new_member_until, post.new_member_label]);
     const { contact: _contact, ...postOut } = post;
+    // Public name for this post: '@tag' when the poster is a member
+    // with a tag, else their first name.
+    postOut.display_name = displayFor(member, post.name);
     res.status(201).json(postOut);
   } catch (e) { next(e); }
 });
 app.get('/v1/board', async (req, res, next) => {
   try {
     // New-member posts first (their window still open), then newest first.
-    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, status, created_at,
+    // Contact is fetched only to resolve the public display name —
+    // it is stripped before responding, like the new-member fields
+    // it is never exposed.
+    const posts = await dbAll(`SELECT id, name, kind, title, description, price, location, contact, status, created_at,
                                is_new_member, new_member_until, new_member_label
                                FROM board_posts WHERE status = 'open'
                                ORDER BY (new_member_until > ?) DESC, created_at DESC`, [now()]);
-    res.json({ board: posts.map(withNewMember) });
+    const out = [];
+    for (const p of posts) {
+      const row = withNewMember(p);
+      row.display_name = await displayNameByContact(p.contact, p.name);
+      delete row.contact;
+      out.push(row);
+    }
+    res.json({ board: out });
   } catch (e) { next(e); }
 });
 app.post('/v1/board/:id/contact', rateLimit('board-contact'), async (req, res, next) => {
@@ -818,10 +896,23 @@ app.get('/v1/jobs', async (req, res, next) => {
   try {
     const status = req.query.status || 'open';
     // New-member posts first (their window still open), then newest first.
-    const jobs = await dbAll(`SELECT id, title, description, location, payout, fee, status, pricing_mode, created_at,
+    // Contact is fetched only to resolve the poster's public display
+    // name — it is stripped before responding and never exposed.
+    const jobs = await dbAll(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
                              is_new_member, new_member_until, new_member_label
                              FROM jobs WHERE status = ? ORDER BY (new_member_until > ?) DESC, created_at DESC`, [status, now()]);
-    res.json({ jobs: jobs.map(withNewMember).map(withSplit) });
+    const out = [];
+    for (const j of jobs) {
+      const row = withSplit(withNewMember(j));
+      // Public poster name: '@tag' when the poster is a member with a
+      // tag, else the member's first name; null when the poster is not
+      // a member (agent jobs, or a non-member human poster) — the card
+      // then shows no poster line, as before.
+      row.poster_display = await displayNameByContact(j.contact, null);
+      delete row.contact;
+      out.push(row);
+    }
+    res.json({ jobs: out });
   } catch (e) { next(e); }
 });
 
@@ -862,6 +953,11 @@ app.get('/v1/jobs/:id/bids', async (req, res, next) => {
     }
     const bids = await dbAll(`SELECT id, worker_name, amount, status, created_at FROM bids
                               WHERE job_id = ? ORDER BY created_at DESC`, [req.params.id]);
+    // Public bidder name: '@tag' when exactly one member has that
+    // full name and set a tag; otherwise the name as the bidder typed it.
+    for (const b of bids) {
+      b.display_name = await displayNameByName(b.worker_name);
+    }
     const split = withSplit(job);
     res.json({ job_id: job.id, pricing_mode: job.pricing_mode || 'fixed', payout: job.payout,
                poster_pays: split.poster_pays, worker_gets: split.worker_gets, bids });
@@ -981,7 +1077,10 @@ app.post('/v1/jobs/:id/claim', rateLimit('claim'), async (req, res, next) => {
     // The claim response is the ONLY place the poster's contact is ever
     // returned: the claiming worker needs it to reach the poster for the
     // exact address. Location is public area-level text.
-    res.json({ job_id: job.id, status: 'claimed', worker: worker.name, claim_code,
+    // worker_display is the claimer's own public name ('@tag' when
+    // their contact belongs to a member with a tag, else their name).
+    const workerDisplay = await displayNameByContact(worker_contact, worker_name) || worker.name;
+    res.json({ job_id: job.id, status: 'claimed', worker: worker.name, worker_display: workerDisplay, claim_code,
                location: job.location || '', contact: job.contact || '' });
   } catch (e) { next(e); }
 });
@@ -1054,7 +1153,7 @@ app.get('/v1/wallet', agentAuth, async (req, res, next) => {
 // Club join: someone signs up via the landing page form.
 app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
   try {
-    const { name, contact } = req.body || {};
+    const { name, contact, username: usernameRaw } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
     if (!contact || !String(contact).trim()) return res.status(400).json({ error: 'contact is required' });
     const member = { id: uid('mem'), name: String(name).trim().slice(0, 80),
@@ -1062,16 +1161,36 @@ app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
     // Anti-gaming: if this contact already joined, keep the FIRST join
     // — do not insert a second row and do not restart the 30-day
     // new-member window. The earliest created_at is the only one that counts.
+    // Same for the tag: a re-join never steals or changes a username —
+    // the original tag stays, whatever the re-join asked for.
     const existing = await earliestMemberByContact(member.contact);
     if (existing) {
       const win = newMemberWindow(existing);
       return res.status(201).json({ ok: true, member_id: existing.id, joined_at: existing.created_at,
-                                    already_member: true, new_member_until: win ? win.until : null });
+                                    already_member: true, username: existing.username || null,
+                                    new_member_until: win ? win.until : null });
     }
-    await dbRun('INSERT INTO members (id, name, contact, created_at) VALUES (?, ?, ?, ?)',
-                [member.id, member.name, member.contact, member.created_at]);
+    // Optional username / tag: validated here, stored without the @.
+    const check = validateUsername(usernameRaw);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+    if (check.username && await usernameTaken(check.username)) {
+      return res.status(400).json({ error: 'That tag is already taken — pick another one.' });
+    }
+    member.username = check.username;
+    try {
+      await dbRun('INSERT INTO members (id, name, contact, username, created_at) VALUES (?, ?, ?, ?, ?)',
+                  [member.id, member.name, member.contact, member.username, member.created_at]);
+    } catch (e) {
+      // Race with another signup for the same tag: the unique index
+      // caught it — say so plainly instead of a 500.
+      if (String(e && e.message || '').includes('UNIQUE')) {
+        return res.status(400).json({ error: 'That tag is already taken — pick another one.' });
+      }
+      throw e;
+    }
     const win = newMemberWindow(member);
     res.status(201).json({ ok: true, member_id: member.id, joined_at: member.created_at,
+                           username: member.username || null,
                            new_member_until: win ? win.until : null });
   } catch (e) { next(e); }
 });

@@ -263,6 +263,10 @@
     <label>How do we reach you? <span class="muted">(phone or email)</span>
       <input type="text" id="join-contact" required maxlength="120" placeholder="Phone or email">
     </label>
+    <label>Username / tag <span class="muted">(optional)</span>
+      <input type="text" id="join-username" maxlength="20" placeholder="@LeafKing">
+    </label>
+    <p class="muted" style="font-size:0.85rem; margin:-8px 0 16px;">Pick a public name for your posts, like @LeafKing. Leave it blank and your first name shows instead. Your real name and contact stay private either way.</p>
     <label>Which gig? <span class="muted">(optional — filled in when you tap a gig idea)</span>
       <input type="text" id="join-gig" maxlength="120" placeholder="e.g. Leaf cleanup">
     </label>
@@ -385,20 +389,25 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
   const msg = document.getElementById('join-msg');
   const name = document.getElementById('join-name').value.trim();
   const contact = document.getElementById('join-contact').value.trim();
+  const username = document.getElementById('join-username').value.trim();
   const gig = document.getElementById('join-gig').value.trim();
   msg.textContent = 'Joining…';
   try {
     const res = await fetch('/v1/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, contact, gig: gig || undefined })
+      body: JSON.stringify({ name, contact, username: username || undefined, gig: gig || undefined })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
-    msg.textContent = "You're in! We'll be in touch soon.";
+    msg.textContent = data.username
+      ? "You're in! Your tag is @" + data.username + " — that's the name on your posts."
+      : "You're in! We'll be in touch soon.";
     e.target.reset();
   } catch (err) {
-    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+    // Show the server's plain message when there is one (e.g. a tag
+    // already taken) so the person knows what to fix.
+    msg.textContent = (err && err.message) || 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
 // Fee line under the payout field. The 7% fee is split evenly: the
@@ -472,7 +481,7 @@ function loadBids(jobId) {
     var bids = ((d && d.bids) || []).filter(function (b) { return b.status === 'open'; });
     if (!bids.length) { el.textContent = 'No bids yet.'; return; }
     el.textContent = 'Bids so far: ' + bids.map(function (b) {
-      return String(b.worker_name || '').replace(/</g, '&lt;') + ' — $' + money(Number(b.amount || 0));
+      return String(b.display_name || b.worker_name || '').replace(/</g, '&lt;') + ' — $' + money(Number(b.amount || 0));
     }).join(' • ');
   }).catch(function () {});
 }
@@ -535,6 +544,7 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
     // Bid / counter-offer form: name + amount, posts to /v1/jobs/:id/bid.
     // Bids are public (name + amount only, no contact).
     return '<div class="card"><h3>' + t + badge + '</h3>'
+      + (j.poster_display ? '<p>👤 ' + String(j.poster_display).replace(/</g, '&lt;') + '</p>' : '')
       + (desc ? '<p>' + desc + '</p>' : '')
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
       + priceLine
@@ -571,6 +581,9 @@ function loadBoard() {
     el.innerHTML = posts.map(function (p) {
       var esc = function (s) { return String(s || '').replace(/</g, '&lt;'); };
       var tag = tags[p.kind] || '';
+      // Public name: '@tag' when the poster is a member with a tag,
+      // else the first name they posted under.
+      var shown = p.display_name || p.name;
       // Seeking work: no direct contact — the button starts a hire,
       // jumping to the on-site job form. Contact is shared only after
       // that job is claimed. Sales / wanted / other: contact on tap,
@@ -580,15 +593,15 @@ function loadBoard() {
         // Hire prefill: tapping this fills the job form with the person's
         // name and job title, then jumps to it. Values are URI-encoded so
         // quotes in a name or title cannot break the button.
-        action = '<p style="margin-top:12px;"><button class="big-btn" data-hire-name="' + encodeURIComponent(p.name || '') + '" data-hire-title="' + encodeURIComponent(p.title || '') + '" data-hire-price="' + encodeURIComponent(p.price || '') + '">Hire them — post a job</button></p>'
-          + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(p.name) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%, split evenly between poster and worker.</p>';
+        action = '<p style="margin-top:12px;"><button class="big-btn" data-hire-name="' + encodeURIComponent(shown || '') + '" data-hire-title="' + encodeURIComponent(p.title || '') + '" data-hire-price="' + encodeURIComponent(p.price || '') + '">Hire them — post a job</button></p>'
+          + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(shown) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%, split evenly between poster and worker.</p>';
       } else {
         action = '<p style="margin-top:12px;"><button class="big-btn" data-board-contact="' + esc(p.id) + '">Get their contact</button></p>'
           + '<p class="muted" id="board-contact-' + esc(p.id) + '"></p>';
       }
       return '<div class="card box-btn"><h3>' + (tag ? tag + ': ' : '') + esc(p.title) + '</h3>'
         + (p.description ? '<p>' + esc(p.description) + '</p>' : '')
-        + '<p>👤 ' + esc(p.name) + (p.is_new_member ? ' <span class="new-member-badge">⭐ ' + esc(p.new_member_label || 'New member') + '</span>' : '') + (p.location ? ' • 📍 ' + esc(p.location) : '') + '</p>'
+        + '<p>👤 ' + esc(shown) + (p.is_new_member ? ' <span class="new-member-badge">⭐ ' + esc(p.new_member_label || 'New member') + '</span>' : '') + (p.location ? ' • 📍 ' + esc(p.location) : '') + '</p>'
         + (p.price ? '<p style="margin-top:12px; color:var(--red); font-weight:600;">' + esc(p.price) + '</p>' : '')
         + action + '</div>';
     }).join('');
@@ -659,7 +672,7 @@ document.getElementById('manage-form').addEventListener('submit', async (e) => {
     if (!bids.length) { msg.textContent = 'No open bids on this job yet.'; return; }
     msg.textContent = bids.length + ' open bid' + (bids.length === 1 ? '' : 's') + ' on this job:';
     out.innerHTML = bids.map(function (b) {
-      return '<div class="card"><h3>' + escHtml(b.worker_name) + ' — $' + money(Number(b.amount || 0)) + '</h3>'
+      return '<div class="card"><h3>' + escHtml(b.display_name || b.worker_name) + ' — $' + money(Number(b.amount || 0)) + '</h3>'
         + '<p class="muted" style="font-size:0.9rem;">Bid ID: ' + escHtml(b.id) + '</p>'
         + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'accept\')">Accept this bid</button>'
         + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'decline\')">Decline</button>'
