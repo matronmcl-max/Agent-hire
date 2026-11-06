@@ -45,13 +45,14 @@
 
 <section>
   <h2>How the money works</h2>
-  <p>Payment is arranged with the poster before work starts — nothing is held yet. When the work is approved, the poster pays the worker, and the club keeps a flat 7% of the payout. That's it — no other cut, no surprise fees.</p>
+  <p>Payment is arranged with the poster before work starts — nothing is held yet. When the work is approved, the poster pays the worker, and the club keeps a flat 7% of the job price, split evenly — the poster pays half the fee and the worker pays half. That's it — no other cut, no surprise fees.</p>
   <div class="card example">
     <p class="example-note">EXAMPLE FORMAT — not a real job. Shown so you can see exactly how a completed job will appear here.</p>
     <h3>Example: Yard cleanup</h3>
-    <p>Job payout — what the poster pays: <span class="money">$100</span></p>
-    <p>Worker gets: <span class="money">$93</span></p>
-    <p>Club fee (7%): <span class="money">$7</span></p>
+    <p>Job price: <span class="money">$100</span></p>
+    <p>Poster pays: <span class="money">$103.50</span></p>
+    <p>Worker gets: <span class="money">$96.50</span></p>
+    <p>Club fee (7%, split evenly): <span class="money">$7</span></p>
     <p>Status: Example only — no real job, no money moved.</p>
   </div>
   <p>No names and no contact details ever appear on this page. Only the job, the payout, and the fee.</p>
@@ -72,20 +73,25 @@ fetch('/v1/jobs?status=released').then(function (r) { return r.json(); }).then(f
     return;
   }
   note.textContent = jobs.length + ' completed job' + (jobs.length === 1 ? '' : 's') + ':';
-  var paid = 0, fees = 0;
+  // Amounts from the API are integer cents; the 7% fee is split evenly.
+  function money(cents) { var d = Number(cents || 0) / 100; return d % 1 === 0 ? String(d) : d.toFixed(2); }
+  var paid = 0, fees = 0, posters = 0;
   list.innerHTML = jobs.map(function (j) {
     var t = String(j.title || 'Job').replace(/</g, '&lt;');
     var loc = String(j.location || '').replace(/</g, '&lt;');
     var pay = Number(j.payout || 0), fee = Number(j.fee || 0);
-    paid += pay; fees += fee;
+    var workerGets = pay - Math.floor(fee / 2), posterPays = pay + Math.ceil(fee / 2);
+    paid += workerGets; fees += fee; posters += posterPays;
     return '<div class="card"><h3>' + t + '</h3>'
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
-      + '<p>Worker paid: <span class="money">$' + pay + '</span></p>'
-      + '<p>Club fee (7%): <span class="money">$' + fee + '</span></p>'
+      + '<p>Poster paid: <span class="money">$' + money(posterPays) + '</span></p>'
+      + '<p>Worker paid: <span class="money">$' + money(workerGets) + '</span></p>'
+      + '<p>Club fee (7%, split evenly): <span class="money">$' + money(fee) + '</span></p>'
       + '<p>Status: Released after approval</p></div>';
   }).join('');
-  totals.innerHTML = '<table><tr><th>Total paid to workers</th><td class="money">$' + paid + '</td></tr>'
-    + '<tr><th>Total club fees (7%)</th><td class="money">$' + fees + '</td></tr></table>';
+  totals.innerHTML = '<table><tr><th>Total paid by posters</th><td class="money">$' + money(posters) + '</td></tr>'
+    + '<tr><th>Total paid to workers</th><td class="money">$' + money(paid) + '</td></tr>'
+    + '<tr><th>Total club fees (7%)</th><td class="money">$' + money(fees) + '</td></tr></table>';
 }).catch(function () {
   document.getElementById('proof-note').textContent = 'Could not load completed jobs right now — try again in a bit.';
 });

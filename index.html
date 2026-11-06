@@ -206,7 +206,7 @@
   <ol class="narrow muted" style="margin-bottom:24px; padding-left:20px;">
     <li><strong style="color:var(--fg);">Post it</strong> — tell us what you need and what you'll pay, or leave it open to bids and let workers name their price. We'll be in touch to arrange payment before work starts — no money is held yet.</li>
     <li><strong style="color:var(--fg);">A member does it</strong> — someone from the club claims it and gets it done.</li>
-    <li><strong style="color:var(--fg);">You approve, then you pay them</strong> — check the work. If it's right, you pay them. The club keeps a flat <span class="red">7%</span> — out in the open, no hidden cuts.</li>
+    <li><strong style="color:var(--fg);">You approve, then you pay them</strong> — check the work. If it's right, you pay them. The club keeps a flat <span class="red">7%</span>, split evenly between poster and worker — out in the open, no hidden cuts.</li>
   </ol>
   <form class="join" id="job-form" style="margin-bottom:24px;">
     <label>What needs doing?
@@ -397,20 +397,30 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
     msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
-// Fee line under the payout field: fee = max(1, round(payout * 0.07)).
-// Worker gets payout minus the fee. Open-to-bids: no fee set yet.
+// Fee line under the payout field. The 7% fee is split evenly: the
+// poster pays payout + half the fee, the worker gets payout - half the
+// fee, the club keeps the full 7% (minimum $1). Worked in cents so a
+// $3.50 half is exact; the poster pays the extra cent when the fee is
+// odd in cents. Open-to-bids: no fee set yet.
+// money(cents) formats cents as dollars, dropping ".00" when whole.
+function money(cents) { var d = Number(cents || 0) / 100; return d % 1 === 0 ? String(d) : d.toFixed(2); }
+function feeSplit(payoutDollars) {
+  var payCents = Math.round(payoutDollars * 100);
+  var feeCents = Math.max(100, Math.round(payCents * 0.07));
+  return { fee: feeCents, posterPays: payCents + Math.ceil(feeCents / 2), workerGets: payCents - Math.floor(feeCents / 2) };
+}
 function updateFeeLine() {
   var line = document.getElementById('job-fee-line');
   if (!line) return;
   var openBid = document.getElementById('job-open-bid').checked;
   if (openBid) {
-    line.textContent = 'No fee set yet — the fee is 7% of the accepted bid (minimum $1).';
+    line.textContent = 'No fee set yet — the fee is 7% of the accepted bid (minimum $1), split evenly between poster and worker.';
     return;
   }
   var payout = parseInt(document.getElementById('job-payout').value, 10);
   if (!payout || payout <= 0) { line.textContent = ''; return; }
-  var fee = Math.max(1, Math.round(payout * 0.07));
-  line.textContent = 'Club fee: $' + fee + ' (7%, minimum $1). Worker gets $' + (payout - fee) + '.';
+  var s = feeSplit(payout);
+  line.textContent = 'You pay $' + money(s.posterPays) + ' · worker gets $' + money(s.workerGets) + ' · club keeps $' + money(s.fee) + ' (7% fee, split evenly, minimum $1).';
 }
 document.getElementById('job-payout').addEventListener('input', updateFeeLine);
 document.getElementById('job-open-bid').addEventListener('change', updateFeeLine);
@@ -458,7 +468,7 @@ function loadBids(jobId) {
     var bids = ((d && d.bids) || []).filter(function (b) { return b.status === 'open'; });
     if (!bids.length) { el.textContent = 'No bids yet.'; return; }
     el.textContent = 'Bids so far: ' + bids.map(function (b) {
-      return String(b.worker_name || '').replace(/</g, '&lt;') + ' — $' + Number(b.amount || 0);
+      return String(b.worker_name || '').replace(/</g, '&lt;') + ' — $' + money(Number(b.amount || 0));
     }).join(' • ');
   }).catch(function () {});
 }
@@ -472,7 +482,7 @@ function submitBid(jobId, isOpenBid) {
   msg.textContent = 'Sending your bid…';
   fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/bid', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ worker_name: name, amount: amount })
+    body: JSON.stringify({ worker_name: name, amount: amount * 100 })
   }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); }).then(function (out) {
     if (!out.ok) { msg.textContent = (out.data && out.data.error) || 'That did not go through.'; return; }
     msg.textContent = isOpenBid ? 'Bid sent! The poster picks one.' : 'Counter-offer sent! The poster can accept or decline it.';
@@ -516,7 +526,7 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
     var isOpenBid = j.pricing_mode === 'open_bid';
     var priceLine = isOpenBid
       ? '<p style="margin-top:12px; color:var(--gold); font-weight:600;">Open to bids — no fixed price yet</p>'
-      : '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + Number(j.payout || 0) + '</p>';
+      : '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + money(Number(j.poster_pays != null ? j.poster_pays : (j.payout || 0) + Math.ceil((j.fee || 0) / 2))) + ' · worker gets $' + money(Number(j.worker_gets != null ? j.worker_gets : (j.payout || 0) - Math.floor((j.fee || 0) / 2))) + '</p>';
     // Bid / counter-offer form: name + amount, posts to /v1/jobs/:id/bid.
     // Bids are public (name + amount only, no contact).
     return '<div class="card"><h3>' + t + '</h3>'
@@ -566,7 +576,7 @@ function loadBoard() {
         // name and job title, then jumps to it. Values are URI-encoded so
         // quotes in a name or title cannot break the button.
         action = '<p style="margin-top:12px;"><button class="big-btn" data-hire-name="' + encodeURIComponent(p.name || '') + '" data-hire-title="' + encodeURIComponent(p.title || '') + '" data-hire-price="' + encodeURIComponent(p.price || '') + '">Hire them — post a job</button></p>'
-          + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(p.name) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%.</p>';
+          + '<p class="muted" style="margin-top:8px;">Post the job in the form below — ' + esc(p.name) + ', ' + esc(p.title) + (p.price ? ' (' + esc(p.price) + ')' : '') + '. Contact is shared after the job is posted and claimed — the club keeps a flat 7%, split evenly between poster and worker.</p>';
       } else {
         action = '<p style="margin-top:12px;"><button class="big-btn" data-board-contact="' + esc(p.id) + '">Get their contact</button></p>'
           + '<p class="muted" id="board-contact-' + esc(p.id) + '"></p>';
@@ -644,7 +654,7 @@ document.getElementById('manage-form').addEventListener('submit', async (e) => {
     if (!bids.length) { msg.textContent = 'No open bids on this job yet.'; return; }
     msg.textContent = bids.length + ' open bid' + (bids.length === 1 ? '' : 's') + ' on this job:';
     out.innerHTML = bids.map(function (b) {
-      return '<div class="card"><h3>' + escHtml(b.worker_name) + ' — $' + Number(b.amount || 0) + '</h3>'
+      return '<div class="card"><h3>' + escHtml(b.worker_name) + ' — $' + money(Number(b.amount || 0)) + '</h3>'
         + '<p class="muted" style="font-size:0.9rem;">Bid ID: ' + escHtml(b.id) + '</p>'
         + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'accept\')">Accept this bid</button>'
         + '<button class="big-btn" style="margin-top:10px; padding:12px; font-size:1rem;" onclick="decideBid(\'' + escHtml(jobId) + '\', \'' + escHtml(b.id) + '\', \'decline\')">Decline</button>'
