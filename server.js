@@ -419,7 +419,7 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
       }
       pay = 0;
     } else if (!Number.isInteger(pay) || pay <= 0) {
-      return res.status(400).json({ error: 'title and positive integer payout are required' });
+      return res.status(400).json({ error: 'title and a positive whole-dollar payout are required (or leave it open to bids)' });
     }
     const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
     const total = pay + fee;
@@ -535,7 +535,7 @@ app.post('/v1/seeking/:id/contact', async (req, res, next) => {
     if (!post) return res.status(404).json({ error: 'Seeking post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
     // No direct contact for seeking work — hire through a job instead.
-    return res.status(409).json({ error: 'Hire through a job — post a job for this person, and their contact is shared after the job is claimed.' });
+    return res.status(409).json({ error: 'Hire through a job — post a job for this person' });
   } catch (e) { next(e); }
 });
 
@@ -633,7 +633,7 @@ app.post('/v1/board/:id/contact', rateLimit('board-contact'), async (req, res, n
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
     if (post.kind === 'seeking') {
       // No direct contact for seeking work — hire through a job instead.
-      return res.status(409).json({ error: 'Hire through a job — post a job for this person, and their contact is shared after the job is claimed.' });
+      return res.status(409).json({ error: 'Hire through a job — post a job for this person' });
     }
     res.json({ id: post.id, name: post.name, contact: post.contact });
   } catch (e) { next(e); }

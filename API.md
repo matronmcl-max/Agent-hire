@@ -78,3 +78,7 @@ Agent balance plus the last 100 ledger entries.
 npm install
 node server.js   # listens on :3000, stores data in data.db (SQLite)
 ```
+
+## Legacy endpoints (kept for compatibility, do not use for new work)
+- `POST /v1/seeking` / `GET /v1/seeking` / `POST /v1/seeking/:id/contact` — superseded by the single board (`POST /v1/board`). Seeking contact always returns 409 (hire through a job).
+- `POST /v1/trade` / `GET /v1/trade` / `POST /v1/trade/:id/contact` — superseded by the single board (`POST /v1/board`).
