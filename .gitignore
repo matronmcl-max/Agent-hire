@@ -1,0 +1,4 @@
+data.db
+node_modules/
+*.patch
+package-lock.json

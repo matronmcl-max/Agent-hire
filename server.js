@@ -19,7 +19,21 @@ const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
+// Behind Render's proxy: trust X-Forwarded-For (first hop) so req.ip is
+// the real client IP — the rate limiter below depends on it.
+app.set('trust proxy', 1);
 app.use(express.json());
+// Malformed JSON bodies get a 400 (not a 500). For POST /mcp the
+// JSON-RPC parse error -32700 applies instead (C4, audit Nov 5-6).
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    if (req.path === '/mcp') {
+      return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: invalid JSON' } });
+    }
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  next(err);
+});
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const PLATFORM_FEE_RATE = 0.07; // 7% per completed job
@@ -108,7 +122,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    api_key TEXT UNIQUE NOT NULL,
+    api_key TEXT UNIQUE,
     balance INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   )`,
@@ -132,6 +146,10 @@ const SCHEMA = [
     created_at TEXT NOT NULL,
     completed_at TEXT,
     released_at TEXT,
+    escrowed INTEGER NOT NULL DEFAULT 0,
+    manage_code TEXT,
+    claim_code TEXT,
+    claim_contact TEXT DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(id),
     FOREIGN KEY (worker_id) REFERENCES workers(id)
   )`,
@@ -215,10 +233,97 @@ async function initSchema() {
   // Existing live jobs table has no pricing_mode column: add it if missing.
   // pricing_mode: 'fixed' (poster sets price, default) or 'open_bid' (no price yet, workers bid).
   try { await dbRun("ALTER TABLE jobs ADD COLUMN pricing_mode TEXT DEFAULT 'fixed'"); } catch (_) {}
+  // Audit Nov 5-6: per-job escrow tracking + poster/claim codes.
+  // These ALTERs are no-ops on fresh DBs (columns already in SCHEMA)
+  // and add the columns to existing DBs; errors mean "already exists".
+  for (const col of [
+    'ALTER TABLE jobs ADD COLUMN escrowed INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE jobs ADD COLUMN manage_code TEXT',
+    'ALTER TABLE jobs ADD COLUMN claim_code TEXT',
+    "ALTER TABLE jobs ADD COLUMN claim_contact TEXT DEFAULT ''",
+  ]) { try { await dbRun(col); } catch (_) {} }
+  // Backfill escrowed for legacy agent jobs that already hold escrow:
+  // open/claimed/completed agent jobs (not website jobs, not released)
+  // held payout+fee. Website jobs hold nothing (escrowed stays 0).
+  try {
+    await dbRun(`UPDATE jobs SET escrowed = payout + fee WHERE escrowed = 0
+                 AND agent_id != 'agt_website' AND status IN ('open','claimed','completed')
+                 AND (payout + fee) > 0`);
+  } catch (_) {}
+  await ensureWebsiteAgent();
 }
 
 const now = () => new Date().toISOString();
 const uid = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
+// Random per-job codes. manage_code (12 hex chars) is issued once when a
+// human posts a job; claim_code (6 hex chars) is issued once on claim.
+const newManageCode = () => crypto.randomBytes(6).toString('hex');
+const newClaimCode = () => crypto.randomBytes(3).toString('hex');
+// Constant-time code comparison (both sides must be non-empty strings).
+function codesEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+// ---------- Rate limiting (in-memory, per IP, per endpoint) ----------
+// Simple abuse guard for public write + contact-revealing endpoints:
+// max 20 requests per 10 minutes per IP per endpoint, then 429.
+// Buckets are per endpoint (claim, board-contact, join, human-jobs,
+// board, bid, hit) so hammering one endpoint never blocks the others.
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const rateLimitBuckets = new Map(); // key "endpoint|ip" -> { count, resetAt }
+function rateLimit(endpoint) {
+  return (req, res, next) => {
+    const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+    const key = endpoint + '|' + ip;
+    const nowMs = Date.now();
+    let bucket = rateLimitBuckets.get(key);
+    if (!bucket || nowMs >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: nowMs + RATE_LIMIT_WINDOW_MS };
+      rateLimitBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+    if (bucket.count > RATE_LIMIT_MAX) {
+      return res.status(429).json({ error: 'Too many requests — please wait a few minutes and try again.' });
+    }
+    next();
+  };
+}
+
+// The website form needs an agent row for the jobs.agent_id foreign
+// key, but it must have NO usable key: NULL where the DB allows it,
+// otherwise a random value generated at runtime (never logged, never
+// committed). Any stale fixed placeholder key is rotated away on sight.
+// agentAuth rejects a NULL/missing key, so this row can never post.
+function websiteUnusableKey() {
+  return 'dtd_website_unusable_' + crypto.randomBytes(24).toString('hex');
+}
+async function ensureWebsiteAgent() {
+  const row = await dbGet('SELECT * FROM agents WHERE id = ?', ['agt_website']);
+  if (!row) {
+    try {
+      await dbRun(`INSERT INTO agents (id, name, api_key, balance, created_at)
+                   VALUES ('agt_website', 'Website job form', NULL, 0, ?)`, [now()]);
+      return;
+    } catch (_) { /* older DBs have api_key NOT NULL — fall through to a random key */ }
+    await dbRun(`INSERT INTO agents (id, name, api_key, balance, created_at)
+                 VALUES ('agt_website', 'Website job form', ?, 0, ?)`, [websiteUnusableKey(), now()]);
+    return;
+  }
+  // Already NULL, or already rotated to a runtime random key: leave it.
+  if (!row.api_key || String(row.api_key).startsWith('dtd_website_unusable_')) return;
+  // Stale key of any other form (including the old fixed placeholder):
+  // rotate it away so no committed key can ever auth as this row.
+  try {
+    await dbRun("UPDATE agents SET api_key = NULL WHERE id = 'agt_website'");
+  } catch (_) {
+    await dbRun('UPDATE agents SET api_key = ? WHERE id = ?', [websiteUnusableKey(), 'agt_website']);
+  }
+}
 
 // ---------- Auth ----------
 async function agentAuth(req, res, next) {
@@ -226,12 +331,46 @@ async function agentAuth(req, res, next) {
     const key = req.header('X-API-Key');
     if (!key) return res.status(401).json({ error: 'Missing X-API-Key header' });
     const agent = await dbGet('SELECT * FROM agents WHERE api_key = ?', [key]);
-    if (!agent) return res.status(401).json({ error: 'Invalid API key' });
+    // A NULL / missing key (e.g. the agt_website row) can never auth:
+    // SQL NULL never equals the supplied key, and this guard is the backstop.
+    if (!agent || !agent.api_key) return res.status(401).json({ error: 'Invalid API key' });
     req.agent = agent;
     next();
   } catch (e) {
     next(e);
   }
+}
+
+// Poster auth for bid accept/decline: EITHER the posting agent's
+// X-API-Key OR a body { manage_code } matching the job's stored code.
+// Returns { via, agent? } on success; on failure it sends the error
+// response itself and returns null (caller must `return` right after).
+// If a manage_code is supplied it is judged on its own: a wrong code is
+// a 403 even if a valid key is also present.
+async function posterAuth(req, res, job) {
+  const body = req.body || {};
+  if (body.manage_code !== undefined && body.manage_code !== null && String(body.manage_code) !== '') {
+    if (job.manage_code && codesEqual(String(body.manage_code), job.manage_code)) {
+      return { via: 'manage_code' };
+    }
+    res.status(403).json({ error: 'Invalid manage_code' });
+    return null;
+  }
+  const key = req.header('X-API-Key');
+  if (!key) {
+    res.status(401).json({ error: 'Missing X-API-Key header or manage_code' });
+    return null;
+  }
+  const agent = await dbGet('SELECT * FROM agents WHERE api_key = ?', [key]);
+  if (!agent || !agent.api_key) {
+    res.status(401).json({ error: 'Invalid API key' });
+    return null;
+  }
+  if (agent.id !== job.agent_id) {
+    res.status(403).json({ error: 'Only the posting agent can manage bids on this job' });
+    return null;
+  }
+  return { via: 'api_key', agent };
 }
 
 // ---------- Routes ----------
@@ -273,6 +412,11 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
     if (!title) return res.status(400).json({ error: 'title is required' });
     let pay = payout;
     if (mode === 'open_bid') {
+      // Open-bid jobs take no price at posting — a supplied payout is a
+      // caller mistake, so 400 instead of silently ignoring it (C5).
+      if (payout !== undefined && payout !== null && Number(payout) > 0) {
+        return res.status(400).json({ error: 'Open-bid jobs take no payout — leave payout out and let workers bid' });
+      }
       pay = 0;
     } else if (!Number.isInteger(pay) || pay <= 0) {
       return res.status(400).json({ error: 'title and positive integer payout are required' });
@@ -290,10 +434,10 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
     if (total > 0) {
       steps.push({ sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, req.agent.id] });
     }
-    steps.push({ sql: `INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+    steps.push({ sql: `INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
         args: [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
-               job.payout, job.fee, job.pricing_mode, job.created_at] });
+               job.payout, job.fee, job.pricing_mode, total, job.created_at] });
     if (total > 0) {
       steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
               VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`,
@@ -314,13 +458,18 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
 // before work starts, and the 7% fee is the stated price, not a held
 // amount. Same shape as agent jobs so the board, bids and claim flow
 // all work unchanged.
-app.post('/v1/human-jobs', async (req, res, next) => {
+app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
   try {
     const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
     const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
     if (!title || !contact) return res.status(400).json({ error: 'title and contact are required' });
     let pay = payout;
     if (mode === 'open_bid') {
+      // Open-bid jobs take no price at posting — a supplied payout is a
+      // caller mistake, so 400 instead of silently ignoring it (C5).
+      if (payout !== undefined && payout !== null && Number(payout) > 0) {
+        return res.status(400).json({ error: 'Open-bid jobs take no payout — leave payout out and let workers bid' });
+      }
       pay = 0;
     } else if (!Number.isInteger(pay) || pay <= 0) {
       return res.status(400).json({ error: 'title and a positive whole-dollar payout are required (or leave it open to bids)' });
@@ -328,19 +477,20 @@ app.post('/v1/human-jobs', async (req, res, next) => {
     const fee = mode === 'open_bid' ? 0 : Math.max(1, Math.round(pay * PLATFORM_FEE_RATE));
     // jobs.agent_id has a foreign key to agents(id), so the website
     // form needs a real agent row to attach to. It holds no credits
-    // and its api_key is never used to post — humans post here, not
-    // through the MCP.
-    await dbRun(`INSERT OR IGNORE INTO agents (id, name, api_key, balance, created_at)
-                 VALUES ('agt_website', 'Website job form', 'dtd_website_form_no_key', 0, ?)`, [now()]);
+    // and has no usable api_key — humans post here, not through the MCP.
+    await ensureWebsiteAgent();
+    // One-time manage_code: the poster needs it to accept/decline bids
+    // and list bids on this job (no API key for humans). Show it once.
+    const manage_code = newManageCode();
     const job = { id: uid('job'), agent_id: 'agt_website', title: String(title).trim().slice(0, 120),
                   description: String(description).trim().slice(0, 500),
                   payout: pay, fee, location: String(location).trim().slice(0, 120),
                   contact: String(contact).trim().slice(0, 120),
-                  status: 'open', pricing_mode: mode, created_at: now() };
-    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+                  status: 'open', pricing_mode: mode, manage_code, created_at: now() };
+    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, manage_code, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 0, ?, ?)`,
       [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
-       job.payout, job.fee, job.pricing_mode, job.created_at]);
+       job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at]);
     const { contact: _contact, ...jobOut } = job;
     res.status(201).json({ ...jobOut, escrowed: 0, payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts.' });
   } catch (e) { next(e); }
@@ -420,11 +570,15 @@ app.get('/v1/trade', async (req, res, next) => {
     res.json({ trade: posts });
   } catch (e) { next(e); }
 });
-app.post('/v1/trade/:id/contact', async (req, res, next) => {
+app.post('/v1/trade/:id/contact', rateLimit('trade-contact'), async (req, res, next) => {
   try {
     const post = await dbGet('SELECT * FROM trade_posts WHERE id = ?', [req.params.id]);
     if (!post) return res.status(404).json({ error: 'Buy/sell post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
+    const { requester_name, requester_contact } = req.body || {};
+    if (!requester_name || !requester_contact) {
+      return res.status(400).json({ error: 'requester_name and requester_contact are required' });
+    }
     res.json({ id: post.id, name: post.name, contact: post.contact });
   } catch (e) { next(e); }
 });
@@ -436,7 +590,7 @@ app.post('/v1/trade/:id/contact', async (req, res, next) => {
 // escrow -> 7%). Contact is shared only after that job is claimed.
 // Sales / wanted / other posts are flow only (no fee on them), so
 // their contact is still returned on tap.
-app.post('/v1/board', async (req, res, next) => {
+app.post('/v1/board', rateLimit('board'), async (req, res, next) => {
   try {
     const { name, kind = 'other', title, description = '', price = '', location = '', contact = '' } = req.body || {};
     if (!name || !title || !contact) {
@@ -465,8 +619,15 @@ app.get('/v1/board', async (req, res, next) => {
     res.json({ board: posts });
   } catch (e) { next(e); }
 });
-app.post('/v1/board/:id/contact', async (req, res, next) => {
+app.post('/v1/board/:id/contact', rateLimit('board-contact'), async (req, res, next) => {
   try {
+    // Contact is only revealed to someone who says who they are and how
+    // to reach them (RED 7b) — no anonymous contact harvesting.
+    const { requester_name, requester_contact } = req.body || {};
+    if (!requester_name || !String(requester_name).trim() ||
+        !requester_contact || !String(requester_contact).trim()) {
+      return res.status(400).json({ error: 'requester_name and requester_contact are required' });
+    }
     const post = await dbGet('SELECT * FROM board_posts WHERE id = ?', [req.params.id]);
     if (!post) return res.status(404).json({ error: 'Bulletin board post not found' });
     if (post.status !== 'open') return res.status(409).json({ error: `Post is ${post.status}, not open` });
@@ -492,7 +653,7 @@ app.get('/v1/jobs', async (req, res, next) => {
 // Bids / counter-offers on an open job.
 // Fixed-price job: a bid is a counter-offer. Open-bid job: a bid is a bid.
 // One open bid per worker per job — a new bid replaces their old open one.
-app.post('/v1/jobs/:id/bid', async (req, res, next) => {
+app.post('/v1/jobs/:id/bid', rateLimit('bid'), async (req, res, next) => {
   try {
     const { worker_name, amount } = req.body || {};
     if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
@@ -513,37 +674,50 @@ app.post('/v1/jobs/:id/bid', async (req, res, next) => {
 });
 
 // List open bids on a job (public: worker names and amounts only, no contact).
+// Poster listing: when ?manage_code= is supplied it must match the job's
+// stored code (401 otherwise). Without one, this stays the public list.
 app.get('/v1/jobs/:id/bids', async (req, res, next) => {
   try {
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (req.query.manage_code !== undefined) {
+      if (!job.manage_code || !codesEqual(String(req.query.manage_code), job.manage_code)) {
+        return res.status(401).json({ error: 'Invalid manage_code' });
+      }
+    }
     const bids = await dbAll(`SELECT id, worker_name, amount, status, created_at FROM bids
                               WHERE job_id = ? ORDER BY created_at DESC`, [req.params.id]);
     res.json({ job_id: job.id, pricing_mode: job.pricing_mode || 'fixed', payout: job.payout, bids });
   } catch (e) { next(e); }
 });
 
-// Poster (posting agent only) accepts a bid / counter-offer.
-// That bid's amount becomes the job price, payout + 7% fee are escrowed
-// from the agent's balance, and the job becomes claimed by that worker.
-app.post('/v1/jobs/:id/bids/:bidId/accept', agentAuth, async (req, res, next) => {
+// Poster (posting agent's X-API-Key OR body { manage_code }) accepts a
+// bid / counter-offer. That bid's amount becomes the job price and the
+// job becomes claimed by that worker.
+// Agent jobs: payout + 7% fee are escrowed from the agent's balance
+// (fixed-price jobs already escrowed at posting — refund ONLY what was
+// actually held, then escrow the new amount; open-bid jobs held nothing).
+// Website/human jobs (agt_website): NO balance or escrow moves at all —
+// the poster holds no money, so accepting creates no credits (RED 2).
+app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
   try {
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.agent_id !== req.agent.id) return res.status(403).json({ error: 'Only the posting agent can accept a bid' });
+    const poster = await posterAuth(req, res, job);
+    if (!poster) return; // posterAuth already sent the error
     if (job.status !== 'open') return res.status(409).json({ error: `Job is ${job.status}, not open` });
     const bid = await dbGet('SELECT * FROM bids WHERE id = ? AND job_id = ?', [req.params.bidId, req.params.id]);
     if (!bid) return res.status(404).json({ error: 'Bid not found' });
     if (bid.status !== 'open') return res.status(409).json({ error: `Bid is ${bid.status}, not open` });
     const fee = Math.max(1, Math.round(bid.amount * PLATFORM_FEE_RATE));
     const total = bid.amount + fee;
-    // Fixed-price jobs already escrowed their original payout at posting.
-    // Accepting a counter-offer on one means: refund the old escrow, then
-    // escrow the new amount. Open-bid jobs escrowed nothing yet.
-    const alreadyEscrowed = job.payout + job.fee;
-    const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [req.agent.id]);
-    if (agent.balance + alreadyEscrowed < total) {
-      return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: agent.balance + alreadyEscrowed });
+    const isWebsite = job.agent_id === 'agt_website';
+    // Escrow actually held on this job: 0 for website/human jobs.
+    // Legacy rows were backfilled at startup; fall back to payout+fee
+    // for an agent job that somehow still shows 0 held.
+    let alreadyEscrowed = Number(job.escrowed || 0);
+    if (!isWebsite && alreadyEscrowed === 0 && (job.payout + job.fee) > 0) {
+      alreadyEscrowed = job.payout + job.fee;
     }
     let worker = await dbGet('SELECT * FROM workers WHERE name = ?', [bid.worker_name]);
     const steps = [];
@@ -552,33 +726,45 @@ app.post('/v1/jobs/:id/bids/:bidId/accept', agentAuth, async (req, res, next) =>
       steps.push({ sql: 'INSERT INTO workers (id, name, balance, created_at) VALUES (?, ?, 0, ?)',
                    args: [worker.id, worker.name, worker.created_at] });
     }
-    if (alreadyEscrowed > 0) {
-      steps.push({ sql: 'UPDATE agents SET balance = balance + ? WHERE id = ?', args: [alreadyEscrowed, req.agent.id] });
+    if (!isWebsite) {
+      // Refund only what was actually held (never more than the old
+      // payout+fee), then escrow the new amount.
+      const refundAmount = Math.min(alreadyEscrowed, job.payout + job.fee);
+      const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [job.agent_id]);
+      if (!agent) return res.status(500).json({ error: 'Posting agent not found' });
+      if (agent.balance + refundAmount < total) {
+        return res.status(402).json({ error: 'Insufficient balance', needed: total, balance: agent.balance + refundAmount });
+      }
+      if (refundAmount > 0) {
+        steps.push({ sql: 'UPDATE agents SET balance = balance + ? WHERE id = ?', args: [refundAmount, job.agent_id] });
+        steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
+                VALUES (?, 'escrow', ?, ?, 'escrow_refund_counter', ?)`,
+          args: [job.id, job.agent_id, refundAmount, now()] });
+      }
+      steps.push({ sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, job.agent_id] });
       steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
-              VALUES (?, 'escrow', ?, ?, 'escrow_refund_counter', ?)`,
-        args: [job.id, req.agent.id, alreadyEscrowed, now()] });
+                VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`,
+        args: [job.id, job.agent_id, total, now()] });
     }
-    steps.push({ sql: 'UPDATE agents SET balance = balance - ? WHERE id = ?', args: [total, req.agent.id] });
-    steps.push({ sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
-              VALUES (?, ?, 'escrow', ?, 'escrow_hold', ?)`,
-      args: [job.id, req.agent.id, total, now()] });
     steps.push({ sql: "UPDATE bids SET status = 'accepted' WHERE id = ?", args: [bid.id] });
     steps.push({ sql: "UPDATE bids SET status = 'declined' WHERE job_id = ? AND status = 'open' AND id != ?",
       args: [job.id, bid.id] });
-    steps.push({ sql: "UPDATE jobs SET payout = ?, fee = ?, pricing_mode = 'fixed', status = 'claimed', worker_id = ? WHERE id = ?",
-      args: [bid.amount, fee, worker.id, job.id] });
+    steps.push({ sql: "UPDATE jobs SET payout = ?, fee = ?, pricing_mode = 'fixed', status = 'claimed', worker_id = ?, escrowed = ? WHERE id = ?",
+      args: [bid.amount, fee, worker.id, isWebsite ? 0 : total, job.id] });
     await dbTx(steps);
     res.json({ job_id: job.id, status: 'claimed', worker: worker.name, payout: bid.amount, fee,
-               location: job.location || '', contact: job.contact || '' });
+               location: job.location || '', contact: job.contact || '', escrowed: isWebsite ? 0 : total });
   } catch (e) { next(e); }
 });
 
-// Poster declines a bid / counter-offer.
-app.post('/v1/jobs/:id/bids/:bidId/decline', agentAuth, async (req, res, next) => {
+// Poster declines a bid / counter-offer (posting agent's X-API-Key OR
+// body { manage_code }).
+app.post('/v1/jobs/:id/bids/:bidId/decline', async (req, res, next) => {
   try {
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.agent_id !== req.agent.id) return res.status(403).json({ error: 'Only the posting agent can decline a bid' });
+    const poster = await posterAuth(req, res, job);
+    if (!poster) return; // posterAuth already sent the error
     const bid = await dbGet('SELECT * FROM bids WHERE id = ? AND job_id = ?', [req.params.bidId, req.params.id]);
     if (!bid) return res.status(404).json({ error: 'Bid not found' });
     if (bid.status !== 'open') return res.status(409).json({ error: `Bid is ${bid.status}, not open` });
@@ -587,11 +773,14 @@ app.post('/v1/jobs/:id/bids/:bidId/decline', agentAuth, async (req, res, next) =
   } catch (e) { next(e); }
 });
 
-// Worker claims an open job.
-app.post('/v1/jobs/:id/claim', async (req, res, next) => {
+// Worker claims an open job. Requires worker_name AND worker_contact
+// (RED 7a): the poster gets the claimer's contact, stored on the job row.
+// Returns a one-time claim_code the worker needs to complete the job.
+app.post('/v1/jobs/:id/claim', rateLimit('claim'), async (req, res, next) => {
   try {
-    const { worker_name } = req.body || {};
-    if (!worker_name) return res.status(400).json({ error: 'worker_name is required' });
+    const { worker_name, worker_contact } = req.body || {};
+    if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
+    if (!worker_contact || !String(worker_contact).trim()) return res.status(400).json({ error: 'worker_contact is required' });
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'open') return res.status(409).json({ error: `Job is ${job.status}, not open` });
@@ -603,21 +792,26 @@ app.post('/v1/jobs/:id/claim', async (req, res, next) => {
       steps.push({ sql: 'INSERT INTO workers (id, name, balance, created_at) VALUES (?, ?, 0, ?)',
                    args: [worker.id, worker.name, worker.created_at] });
     }
-    steps.push({ sql: "UPDATE jobs SET status = 'claimed', worker_id = ? WHERE id = ?",
-                 args: [worker.id, job.id] });
+    const claim_code = newClaimCode();
+    const claim_contact = String(worker_contact).trim().slice(0, 120);
+    steps.push({ sql: "UPDATE jobs SET status = 'claimed', worker_id = ?, claim_code = ?, claim_contact = ? WHERE id = ?",
+                 args: [worker.id, claim_code, claim_contact, job.id] });
     await dbTx(steps);
     // The claim response is the ONLY place the poster's contact is ever
     // returned: the claiming worker needs it to reach the poster for the
     // exact address. Location is public area-level text.
-    res.json({ job_id: job.id, status: 'claimed', worker: worker.name,
+    res.json({ job_id: job.id, status: 'claimed', worker: worker.name, claim_code,
                location: job.location || '', contact: job.contact || '' });
   } catch (e) { next(e); }
 });
 
 // Worker marks the job complete (agent then verifies + releases).
+// Jobs claimed through /claim carry a claim_code: the code must match
+// (wrong/missing code -> 403). Legacy / bid-accepted jobs have no code
+// stored — the claiming-worker's name check below is the fallback.
 app.post('/v1/jobs/:id/complete', async (req, res, next) => {
   try {
-    const { worker_name } = req.body || {};
+    const { worker_name, claim_code } = req.body || {};
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'claimed') return res.status(409).json({ error: `Job is ${job.status}, not claimed` });
@@ -625,12 +819,19 @@ app.post('/v1/jobs/:id/complete', async (req, res, next) => {
     if (!worker || worker.name !== worker_name) {
       return res.status(403).json({ error: 'Only the claiming worker can complete this job' });
     }
+    if (job.claim_code) {
+      if (!claim_code || !codesEqual(String(claim_code), job.claim_code)) {
+        return res.status(403).json({ error: 'Invalid or missing claim_code' });
+      }
+    }
     await dbRun("UPDATE jobs SET status = 'completed', completed_at = ? WHERE id = ?", [now(), job.id]);
     res.json({ job_id: job.id, status: 'completed', note: 'Awaiting agent verification and release' });
   } catch (e) { next(e); }
 });
 
 // Agent verifies and releases escrow: worker gets payout, platform keeps fee.
+// Only what escrow actually holds is paid out (0 for website jobs, which
+// hold no money) — releasing can never create credits from nothing.
 app.post('/v1/jobs/:id/release', agentAuth, async (req, res, next) => {
   try {
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
@@ -638,32 +839,38 @@ app.post('/v1/jobs/:id/release', agentAuth, async (req, res, next) => {
     if (job.agent_id !== req.agent.id) return res.status(403).json({ error: 'Only the posting agent can release' });
     if (job.status !== 'completed') return res.status(409).json({ error: `Job is ${job.status}, not completed` });
 
+    const held = Number(job.escrowed || 0);
+    const paidWorker = Math.min(job.payout, held);
+    const paidFee = Math.min(job.fee, Math.max(0, held - paidWorker));
     await dbTx([
-      { sql: 'UPDATE workers SET balance = balance + ? WHERE id = ?', args: [job.payout, job.worker_id] },
+      { sql: 'UPDATE workers SET balance = balance + ? WHERE id = ?', args: [paidWorker, job.worker_id] },
       { sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
               VALUES (?, 'escrow', ?, ?, 'payout', ?)`,
-        args: [job.id, job.worker_id, job.payout, now()] },
+        args: [job.id, job.worker_id, paidWorker, now()] },
       { sql: `INSERT INTO ledger (job_id, actor_from, actor_to, amount, kind, created_at)
               VALUES (?, 'escrow', 'platform', ?, 'fee', ?)`,
-        args: [job.id, job.fee, now()] },
-      { sql: "UPDATE jobs SET status = 'released', released_at = ? WHERE id = ?", args: [now(), job.id] },
+        args: [job.id, paidFee, now()] },
+      { sql: "UPDATE jobs SET status = 'released', released_at = ?, escrowed = 0 WHERE id = ?", args: [now(), job.id] },
     ]);
-    res.json({ job_id: job.id, status: 'released', paid_to_worker: job.payout, platform_fee: job.fee });
+    res.json({ job_id: job.id, status: 'released', paid_to_worker: paidWorker, platform_fee: paidFee });
   } catch (e) { next(e); }
 });
 
-// Agent wallet: balance + full ledger.
+// Agent wallet: balance + full ledger. Includes ledger rows whose job_id
+// belongs to the requesting agent (Finding 16), so payout/fee lines
+// show after a release — those rows have actor_from 'escrow', not the agent.
 app.get('/v1/wallet', agentAuth, async (req, res, next) => {
   try {
     const agent = await dbGet('SELECT id, name, balance FROM agents WHERE id = ?', [req.agent.id]);
     const entries = await dbAll(`SELECT * FROM ledger WHERE actor_from = ? OR actor_to = ?
-                                ORDER BY id DESC LIMIT 100`, [req.agent.id, req.agent.id]);
+                                OR job_id IN (SELECT id FROM jobs WHERE agent_id = ?)
+                                ORDER BY id DESC LIMIT 100`, [req.agent.id, req.agent.id, req.agent.id]);
     res.json({ ...agent, ledger: entries });
   } catch (e) { next(e); }
 });
 
 // Club join: someone signs up via the landing page form.
-app.post('/v1/join', async (req, res, next) => {
+app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
   try {
     const { name, contact } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
@@ -676,16 +883,12 @@ app.post('/v1/join', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// List club signups (prototype: no auth — add some before going wide).
-app.get('/v1/members', async (req, res, next) => {
-  try {
-    const members = await dbAll('SELECT id, name, contact, created_at FROM members ORDER BY created_at DESC');
-    res.json({ count: members.length, members });
-  } catch (e) { next(e); }
-});
+// GET /v1/members DELETED Nov 6 2026 (audit RED 1): it publicly exposed
+// member names + contacts. No replacement endpoint — the member list
+// stays private. Signups still land in the members table via /v1/join.
 
 // Anonymous visit counter — logs page views, skips bots. No cookies, no personal data.
-app.post('/v1/hit', async (req, res, next) => {
+app.post('/v1/hit', rateLimit('hit'), async (req, res, next) => {
   try {
     const { path: p = '/', referrer = '' } = req.body || {};
     const ua = req.header('User-Agent') || '';
@@ -698,16 +901,19 @@ app.post('/v1/hit', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Traffic stats: total hits, hits by day (last 30), hits by path. Aggregates only.
+// Traffic stats: total hits, hits by day (last 30), hits by path, member
+// COUNT only. Aggregates only — no member list, no contacts (RED 1).
 app.get('/v1/stats', async (req, res, next) => {
   try {
     const totalRow = await dbGet('SELECT COUNT(*) AS c FROM page_views');
     const total = totalRow ? totalRow.c : 0;
+    const memberRow = await dbGet('SELECT COUNT(*) AS c FROM members');
+    const members = memberRow ? memberRow.c : 0;
     const byDay = await dbAll(`SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS hits
                               FROM page_views GROUP BY day ORDER BY day DESC LIMIT 30`);
     const byPath = await dbAll(`SELECT path, COUNT(*) AS hits FROM page_views
                                GROUP BY path ORDER BY hits DESC LIMIT 20`);
-    res.json({ total, by_day: byDay, by_path: byPath });
+    res.json({ total, members, by_day: byDay, by_path: byPath });
   } catch (e) { next(e); }
 });
 
