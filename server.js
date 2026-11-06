@@ -879,7 +879,7 @@ document.getElementById('btn-tools').addEventListener('click', function () {
 });
 document.getElementById('btn-copy').addEventListener('click', async function () {
   var example = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'example-client', version: '1.0' } } }, null, 2);
-  try { await navigator.clipboard.writeText(example); show('Example request copied — paste it into your agent.\n\n' + example); }
+  try { await navigator.clipboard.writeText(example); show('Example request copied - paste it into your agent. ' + example); }
   catch (e) { show(example); }
 });
 </script>
