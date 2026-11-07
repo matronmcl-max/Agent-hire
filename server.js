@@ -1030,6 +1030,20 @@ app.get('/v1/jobs', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// One job by id (public: same shape as the list — contact never included).
+app.get('/v1/jobs/:id', async (req, res, next) => {
+  try {
+    const j = await dbGet(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
+                           is_new_member, new_member_until, new_member_label
+                           FROM jobs WHERE id = ?`, [req.params.id]);
+    if (!j) return res.status(404).json({ error: 'Job not found' });
+    const row = withSplit(withNewMember(j));
+    row.poster_display = await displayNameByContact(j.contact, null);
+    delete row.contact;
+    res.json(row);
+  } catch (e) { next(e); }
+});
+
 // Bids / counter-offers on an open job.
 // Fixed-price job: a bid is a counter-offer. Open-bid job: a bid is a bid.
 // One open bid per worker per job — a new bid replaces their old open one.
@@ -1649,6 +1663,51 @@ const MCP_TOOLS = [
       required: ['api_key', 'job_id', 'bid_id'],
     },
   },
+  {
+    name: 'complete_job',
+    description: 'Worker marks a claimed job complete (the posting agent then verifies and releases). Requires the claiming worker name and the claim_code from the claim response (when the job has one). Job must be claimed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'string' },
+        worker_name: { type: 'string', description: 'Name of the claiming worker' },
+        claim_code: { type: 'string', description: 'One-time claim code from the claim response' },
+      },
+      required: ['job_id', 'worker_name'],
+    },
+  },
+  {
+    name: 'release_job',
+    description: 'Posting agent verifies the work and releases escrow in DEMO cents: the worker gets payout minus half the 7% fee, the club keeps the full 7%. Requires the posting agent api_key. Job must be completed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'Posting agent API key (never echoed back)' },
+        job_id: { type: 'string' },
+      },
+      required: ['api_key', 'job_id'],
+    },
+  },
+  {
+    name: 'get_balance',
+    description: 'Check an agent demo balance and ledger (escrow holds, payouts, fees). DEMO cents only, not real money. Requires api_key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'Agent API key (never echoed back)' },
+      },
+      required: ['api_key'],
+    },
+  },
+  {
+    name: 'get_job',
+    description: 'Get one job by id — title, status, payout and fee in DEMO cents, pricing mode. Contact is never included.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'string' } },
+      required: ['job_id'],
+    },
+  },
 ];
 
 async function mcpForward(req, method, path, body, apiKey) {
@@ -1770,7 +1829,7 @@ app.post('/mcp', async (req, res, next) => {
         protocolVersion: params.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
         serverInfo: { name: 'dottodotdollars-agent-hire', version: '1.0.0' },
-        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Money is integer cents (100 cents = $1). Tools: register_agent (grants 100,000 demo cents), post_job (requires api_key; fixed or open_bid; the 7% fee is split evenly between poster and worker), list_open_jobs, submit_bid, list_bids, accept_bid (requires posting api_key).',
+        instructions: 'DEMO CREDITS ONLY — NOT REAL MONEY. Money is integer cents (100 cents = $1). Tools: register_agent (grants 100,000 demo cents), post_job (requires api_key; fixed or open_bid; the 7% fee is split evenly between poster and worker), list_open_jobs, submit_bid, list_bids, accept_bid (requires posting api_key), complete_job (worker marks a claimed job done), release_job (posting agent releases escrow), get_balance, get_job.',
       });
     }
     if (method === 'ping') return ok({});
@@ -1821,6 +1880,28 @@ app.post('/mcp', async (req, res, next) => {
           return ok(mcpErrorResult('api_key, job_id and bid_id are required'));
         }
         const r = await mcpForward(req, 'POST', `/v1/jobs/${encodeURIComponent(args.job_id)}/bids/${encodeURIComponent(args.bid_id)}/accept`, {}, args.api_key);
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'complete_job') {
+        if (!args.job_id || !args.worker_name) return ok(mcpErrorResult('job_id and worker_name are required'));
+        const r = await mcpForward(req, 'POST', `/v1/jobs/${encodeURIComponent(args.job_id)}/complete`, {
+          worker_name: args.worker_name, claim_code: args.claim_code || '',
+        });
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'release_job') {
+        if (!args.api_key || !args.job_id) return ok(mcpErrorResult('api_key and job_id are required'));
+        const r = await mcpForward(req, 'POST', `/v1/jobs/${encodeURIComponent(args.job_id)}/release`, {}, args.api_key);
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'get_balance') {
+        if (!args.api_key) return ok(mcpErrorResult('api_key is required'));
+        const r = await mcpForward(req, 'GET', '/v1/wallet', undefined, args.api_key);
+        return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
+      }
+      if (name === 'get_job') {
+        if (!args.job_id) return ok(mcpErrorResult('job_id is required'));
+        const r = await mcpForward(req, 'GET', `/v1/jobs/${encodeURIComponent(args.job_id)}`);
         return ok(r.ok ? mcpTextResult(r.data) : mcpErrorResult(r.data ? JSON.stringify(r.data) : `Upstream error ${r.status}`));
       }
       return ok(mcpErrorResult(`Unknown tool: ${name}`));
