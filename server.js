@@ -15,6 +15,7 @@
 // No token is logged at startup — only which backend is in use.
 
 const express = require('express');
+const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -1357,6 +1358,26 @@ app.post('/v1/claim-tag', rateLimit('join'), async (req, res, next) => {
 // Suggestions + bug reports: public forms on /suggestions and
 // /bug-report. Saved privately for Mat and the club — there is NO
 // public listing endpoint for either table, and contacts left here
+// ---------- Email notifications (suggestions + bug reports) ----------
+// Sends from the club Gmail using a Gmail app password stored in Render
+// env (SMTP_USER / SMTP_PASS) — never in code or chat. If not configured,
+// notifications are silently skipped and the submission still saves.
+// A failed send never fails the submission.
+let mailer;
+function notifyMat(subject, body) {
+  try {
+    if (mailer === undefined) {
+      const user = process.env.SMTP_USER, pass = process.env.SMTP_PASS;
+      mailer = (user && pass)
+        ? nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass } })
+        : null;
+    }
+    if (!mailer) return;
+    mailer.sendMail({ from: process.env.SMTP_USER, to: 'matronmcl@gmail.com', subject, text: body })
+      .catch(e => console.error('notify email failed:', e.message));
+  } catch (e) { console.error('notify email failed:', e.message); }
+}
+
 // are never shown anywhere on the site.
 const SUGGESTION_CATEGORIES = ['Jobs', 'Bulletin board', 'Bridge', 'Music', 'Fair play', 'Something else'];
 app.post('/v1/suggestions', rateLimit('suggestions'), async (req, res, next) => {
@@ -1370,6 +1391,7 @@ app.post('/v1/suggestions', rateLimit('suggestions'), async (req, res, next) => 
                   created_at: now() };
     await dbRun('INSERT INTO suggestions (id, text, category, name, contact, created_at) VALUES (?, ?, ?, ?, ?, ?)',
                 [row.id, row.text, row.category, row.name, row.contact, row.created_at]);
+    notifyMat(`New suggestion (${cat})`, `Category: ${cat}\nFrom: ${row.name || 'anonymous'}${row.contact ? ` (${row.contact})` : ''}\n\n${row.text}`);
     res.status(201).json({ ok: true, suggestion_id: row.id });
   } catch (e) { next(e); }
 });
@@ -1386,6 +1408,7 @@ app.post('/v1/bug-reports', rateLimit('bug-reports'), async (req, res, next) => 
                   created_at: now() };
     await dbRun('INSERT INTO bug_reports (id, text, page, trying_to_do, device, name, contact, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 [row.id, row.text, row.page, row.trying_to_do, row.device, row.name, row.contact, row.created_at]);
+    notifyMat('New bug report', `Page: ${row.page || '—'}\nTrying to do: ${row.trying_to_do || '—'}\nDevice: ${row.device || '—'}\nFrom: ${row.name || 'anonymous'}${row.contact ? ` (${row.contact})` : ''}\n\n${row.text}`);
     res.status(201).json({ ok: true, bug_report_id: row.id });
   } catch (e) { next(e); }
 });
