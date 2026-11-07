@@ -669,6 +669,34 @@ function requireAdminKey(req, res) {
   return res.status(403).json({ error: 'Access denied' }), false;
 }
 
+// ---------- Freeze switch (Nov 7 2026) ----------
+// Temporary lock for testing: when frozen, nobody can post a job,
+// claim one, bid, or join — browsing still works. The flag lives in
+// the meta table, so flipping it needs no restart and no deploy.
+// Mat flips it from /admin (needs ADMIN_KEY). A request carrying a
+// valid admin key bypasses the freeze, so Mat can still post while
+// frozen. Completing/releasing jobs already in flight stays open —
+// the freeze only stops NEW commitments. Board posts and chat stay open.
+const FREEZE_MSG = 'The club is paused for a quick update — posting, claiming and joining are frozen for a bit. Browsing still works, check back soon.';
+async function isFrozen() {
+  try {
+    const row = await dbGet("SELECT value FROM meta WHERE key = 'freeze_mode'");
+    return !!(row && String(row.value) === '1');
+  } catch (_) { return false; }
+}
+function hasAdminBypass(req) {
+  return adminKeySet() && codesEqual(adminKeyFrom(req), process.env.ADMIN_KEY);
+}
+// Returns true (and sends a 503) when the freeze blocks this request.
+async function freezeBlocked(req, res) {
+  if (hasAdminBypass(req)) return false;
+  if (await isFrozen()) {
+    res.status(503).json({ error: FREEZE_MSG, frozen: true });
+    return true;
+  }
+  return false;
+}
+
 // ---------- Routes ----------
 
 // Register an agent (demo: grants demo credits). In production this
@@ -706,6 +734,7 @@ app.post('/v1/agents/register', async (req, res, next) => {
 // nothing at posting; escrow locks when a bid is accepted.
 app.post('/v1/jobs', agentAuth, async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
     const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
     if (!title) return res.status(400).json({ error: 'title is required' });
@@ -761,6 +790,7 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
 // evenly between poster and worker (see the helpers at the top).
 app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
     const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
     if (!title || !contact) return res.status(400).json({ error: 'title and contact are required' });
@@ -1005,6 +1035,7 @@ app.get('/v1/jobs', async (req, res, next) => {
 // One open bid per worker per job — a new bid replaces their old open one.
 app.post('/v1/jobs/:id/bid', rateLimit('bid'), async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const { worker_name, amount } = req.body || {};
     if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
     if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be a positive integer in cents (100 cents = $1)' });
@@ -1060,6 +1091,7 @@ app.get('/v1/jobs/:id/bids', async (req, res, next) => {
 // the poster holds no money, so accepting creates no credits (RED 2).
 app.post('/v1/jobs/:id/bids/:bidId/accept', async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const poster = await posterAuth(req, res, job);
@@ -1139,6 +1171,7 @@ app.post('/v1/jobs/:id/bids/:bidId/decline', async (req, res, next) => {
 // Returns a one-time claim_code the worker needs to complete the job.
 app.post('/v1/jobs/:id/claim', rateLimit('claim'), async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const { worker_name, worker_contact } = req.body || {};
     if (!worker_name || !String(worker_name).trim()) return res.status(400).json({ error: 'worker_name is required' });
     if (!worker_contact || !String(worker_contact).trim()) return res.status(400).json({ error: 'worker_contact is required' });
@@ -1237,6 +1270,7 @@ app.get('/v1/wallet', agentAuth, async (req, res, next) => {
 // Club join: someone signs up via the landing page form.
 app.post('/v1/join', rateLimit('join'), async (req, res, next) => {
   try {
+    if (await freezeBlocked(req, res)) return;
     const { name, contact, username: usernameRaw } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
     if (!contact || !String(contact).trim()) return res.status(400).json({ error: 'contact is required' });
@@ -1483,6 +1517,27 @@ app.post('/v1/admin/delete', async (req, res, next) => {
     if (!table || !id) return res.status(400).json({ error: 'kind and id are required' });
     await dbRun(`DELETE FROM ${table} WHERE id = ?`, [String(id)]);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Freeze switch API (Nov 7 2026) — Mat flips the club freeze from
+// /admin. POST /v1/admin/freeze {frozen: true/false} needs ADMIN_KEY.
+// GET /v1/freeze-status is public so pages can show a banner.
+app.post('/v1/admin/freeze', async (req, res, next) => {
+  try {
+    if (!requireAdminKey(req, res)) return;
+    const frozen = !!(req.body && req.body.frozen);
+    try {
+      await dbRun("INSERT INTO meta (key, value) VALUES ('freeze_mode', ?)", [frozen ? '1' : '0']);
+    } catch (_) {
+      await dbRun("UPDATE meta SET value = ? WHERE key = 'freeze_mode'", [frozen ? '1' : '0']);
+    }
+    res.json({ ok: true, frozen });
+  } catch (e) { next(e); }
+});
+app.get('/v1/freeze-status', async (req, res, next) => {
+  try {
+    res.json({ frozen: await isFrozen() });
   } catch (e) { next(e); }
 });
 

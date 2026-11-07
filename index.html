@@ -97,6 +97,22 @@
   <p class="strike"><s>Resumes</s> &nbsp;<s>Interviews</s> &nbsp;<s>Waiting rooms</s> &nbsp;— bleh.</p>
 </header>
 
+<p id="freeze-banner" hidden style="border:3px solid #f2c94c; background:#5a2f85; border-radius:12px; padding:14px 18px; text-align:center; font-weight:700;">⏸️ The club is paused for a quick update — posting, claiming and joining are frozen for a bit. Browsing still works.</p>
+<script>
+// Freeze banner + admin bypass key: when the page is opened with
+// ?key=<ADMIN_KEY> (Mat's link), the key rides along on job/join
+// posts so the freeze never blocks him. It is never shown on the page.
+var adminKey = '';
+try { adminKey = new URLSearchParams(location.search).get('key') || ''; } catch (e) {}
+(function () {
+  var b = document.getElementById('freeze-banner');
+  if (!b) return;
+  fetch('/v1/freeze-status').then(function (r) { return r.json(); }).then(function (d) {
+    if (d && d.frozen) b.hidden = false;
+  }).catch(function () {});
+})();
+</script>
+
 <figure class="hero" style="margin-bottom:24px;">
   <img src="/images/spokane-water-power-night.jpg" alt="Washington Water Power building at night in Spokane, above the falls">
   <figcaption>Spokane — where the club lives and works.</figcaption>
@@ -414,7 +430,7 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
     const res = await fetch('/v1/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, contact, username: username || undefined, gig: gig || undefined })
+      body: JSON.stringify({ name, contact, username: username || undefined, gig: gig || undefined, key: (typeof adminKey !== 'undefined' && adminKey) || undefined })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
@@ -468,7 +484,8 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
       location: document.getElementById('job-location').value.trim(),
       contact: document.getElementById('job-contact').value.trim(),
       pricing_mode: openBid ? 'open_bid' : 'fixed',
-      payout: openBid ? 0 : payoutVal
+      payout: openBid ? 0 : payoutVal,
+      key: (typeof adminKey !== 'undefined' && adminKey) || undefined
     };
     if (!openBid && (!body.payout || body.payout <= 0)) { msg.textContent = 'Add what you will pay, or tick "open to bids".'; return; }
     const res = await fetch('/v1/human-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -483,7 +500,9 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
     location.hash = '#jobs';
     location.reload();
   } catch (err) {
-    msg.textContent = 'Hmm, that didn\u2019t go through — try again in a bit.';
+    // Show the server's plain message when there is one (e.g. the club
+    // freeze) so the person knows what happened.
+    msg.textContent = (err && err.message) || 'Hmm, that didn\u2019t go through — try again in a bit.';
   }
 });
 </script>

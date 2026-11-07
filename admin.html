@@ -42,6 +42,18 @@
 <p id="status">Loading…</p>
 
 <section>
+  <h2>Freeze the club</h2>
+  <p>Temporary lock for testing. While frozen, nobody can post a job, claim one, bid, or join. Browsing still works, and jobs already in flight can still be finished and released. You can still post while frozen — the freeze never applies to you. Flip it back off when done.</p>
+  <p id="freeze-state">Checking…</p>
+  <div class="item">
+    <div class="actions">
+      <button data-freeze="1">Freeze posting &amp; joining</button>
+      <button data-freeze="0">Unfreeze</button>
+    </div>
+  </div>
+</section>
+
+<section>
   <h2>Suggestions</h2>
   <p>Ideas visitors sent in. Newest first.</p>
   <div id="suggestions-list"></div>
@@ -153,7 +165,42 @@
         }).join('')
       : '<p class="empty">Nothing here yet.</p>';
   }
+  async function loadFreeze() {
+    var fEl = document.getElementById('freeze-state');
+    if (!fEl) return;
+    try {
+      var fr = await fetch('/v1/freeze-status');
+      var fd = await fr.json();
+      fEl.textContent = fd.frozen
+        ? 'Frozen right now — posting, claiming, bidding and joining are paused.'
+        : 'Not frozen — everything is open.';
+    } catch (e) { fEl.textContent = ''; }
+  }
   document.addEventListener('click', async function (e) {
+    var freezeBtn = e.target.closest('button[data-freeze]');
+    if (freezeBtn) {
+      var frozen = freezeBtn.getAttribute('data-freeze') === '1';
+      if (frozen && !confirm('Freeze the club? Nobody can post a job, claim one, bid, or join until you unfreeze it. Browsing still works.')) return;
+      freezeBtn.disabled = true;
+      try {
+        var fres = await fetch('/v1/admin/freeze?key=' + encodeURIComponent(key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frozen: frozen })
+        });
+        if (!fres.ok) {
+          var ferr = await fres.json().catch(function () { return {}; });
+          statusEl.textContent = ferr.error || 'Something went wrong — please try again.';
+        } else {
+          statusEl.textContent = frozen ? 'Frozen.' : 'Unfrozen — everything is open again.';
+          await loadFreeze();
+        }
+      } catch (err4) {
+        statusEl.textContent = 'Something went wrong — please try again in a few minutes.';
+      }
+      freezeBtn.disabled = false;
+      return;
+    }
     var chatBtn = e.target.closest('button[data-chat-action]');
     if (chatBtn) {
       var chatAction = chatBtn.getAttribute('data-chat-action');
@@ -209,6 +256,7 @@
     }
   });
   load();
+  loadFreeze();
 })();
 </script>
 </body>
