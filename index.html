@@ -268,6 +268,10 @@ try { adminKey = new URLSearchParams(location.search).get('key') || ''; } catch 
     <label>Where? <span class="muted">(optional)</span>
       <input type="text" id="job-location" maxlength="120" placeholder="e.g. Spokane, North Side">
     </label>
+    <label>Photos <span class="muted">(optional — up to 3, so workers can see what the job looks like)</span>
+      <input type="file" id="job-photos" accept="image/*" multiple>
+    </label>
+    <div id="job-photo-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin:-8px 0 16px;"></div>
     <label>How do we reach you? <span class="muted">(phone or email — only shared with the worker who claims the job)</span>
       <input type="text" id="job-contact" required maxlength="120" placeholder="Phone or email">
     </label>
@@ -486,6 +490,40 @@ function updateFeeLine() {
 }
 document.getElementById('job-payout').addEventListener('input', updateFeeLine);
 document.getElementById('job-open-bid').addEventListener('change', updateFeeLine);
+// Job photos: up to 3, shrunk in the browser first (max 1000px,
+// JPEG ~0.72) so a phone photo does not blow up the post.
+var jobPhotos = [];
+function showJobPhotoPreview() {
+  var el = document.getElementById('job-photo-preview');
+  if (!el) return;
+  el.innerHTML = jobPhotos.map(function (p) {
+    return '<img src="' + p + '" alt="Job photo" style="width:96px;height:96px;object-fit:cover;border-radius:10px;">';
+  }).join('');
+}
+document.getElementById('job-photos').addEventListener('change', function (e) {
+  var files = Array.prototype.slice.call(e.target.files || []).slice(0, 3);
+  var msg = document.getElementById('job-msg');
+  jobPhotos = [];
+  if (!files.length) { showJobPhotoPreview(); return; }
+  var done = 0;
+  files.forEach(function (file) {
+    if (!file.type || file.type.indexOf('image/') !== 0) { done++; return; }
+    var img = new Image();
+    img.onload = function () {
+      var scale = Math.min(1, 1000 / Math.max(img.width, img.height));
+      var c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      jobPhotos.push(c.toDataURL('image/jpeg', 0.72));
+      done++;
+      if (done === files.length) showJobPhotoPreview();
+    };
+    img.onerror = function () { done++; if (done === files.length) showJobPhotoPreview(); };
+    img.src = URL.createObjectURL(file);
+  });
+  if (msg) msg.textContent = 'Photos added — they will post with the job.';
+});
 document.getElementById('job-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('job-msg');
@@ -500,6 +538,7 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
       contact: document.getElementById('job-contact').value.trim(),
       pricing_mode: openBid ? 'open_bid' : 'fixed',
       payout: openBid ? 0 : payoutVal,
+      photos: jobPhotos,
       key: (typeof adminKey !== 'undefined' && adminKey) || undefined
     };
     if (!openBid && (!body.payout || body.payout <= 0)) { msg.textContent = 'Add what you will pay, or tick "open to bids".'; return; }
@@ -512,6 +551,8 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
     var postedText = "Posted! It's in Open jobs now. Your job ID is " + (data.id || 'shown on the job card') + "." + codeLine + " We'll be in touch to arrange payment before work starts; nothing is held yet.";
     msg.textContent = postedText;
     e.target.reset();
+    jobPhotos = [];
+    showJobPhotoPreview();
     updateFeeLine();
     // Send the poster back to the top of the homepage — NOT to the
     // Open jobs / bid form, which confused posters into thinking they
@@ -600,10 +641,21 @@ fetch('/v1/jobs').then(function (r) { return r.json(); }).then(function (d) {
       : '<p style="margin-top:12px; color:var(--red); font-weight:600;">Pays $' + money(Number(j.poster_pays != null ? j.poster_pays : (j.payout || 0) + Math.ceil((j.fee || 0) / 2))) + ' · worker gets $' + money(Number(j.worker_gets != null ? j.worker_gets : (j.payout || 0) - Math.floor((j.fee || 0) / 2))) + '</p>';
     // Bid / counter-offer form: name + amount, posts to /v1/jobs/:id/bid.
     // Bids are public (name + amount only, no contact).
+    // Job photos (Nov 7 2026): only data:image URLs the server
+    // validated — anything else is skipped, never rendered.
+    var photosHtml = '';
+    if (Array.isArray(j.photos) && j.photos.length) {
+      photosHtml = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">' + j.photos.filter(function (p) {
+        return typeof p === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(p);
+      }).slice(0, 3).map(function (p) {
+        return '<img src="' + p + '" alt="Job photo" style="width:100%; max-width:280px; border-radius:10px;">';
+      }).join('') + '</div>';
+    }
     return '<div class="card"><h3>' + t + badge + '</h3>'
       + (j.poster_display ? '<p>👤 ' + String(j.poster_display).replace(/</g, '&lt;') + '</p>' : '')
       + (desc ? '<p>' + desc + '</p>' : '')
       + (loc ? '<p>📍 ' + loc + '</p>' : '')
+      + photosHtml
       + priceLine
       + '<p class="muted" style="margin-top:8px; font-size:0.9rem;">No real money is held on this job yet — payment is arranged with the poster before work starts.</p>'
       + '<div id="bids-' + j.id + '" class="muted" style="margin-top:8px; font-size:0.9rem;"></div>'

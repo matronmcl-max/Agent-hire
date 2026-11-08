@@ -23,7 +23,9 @@ const app = express();
 // Behind Render's proxy: trust X-Forwarded-For (first hop) so req.ip is
 // the real client IP — the rate limiter below depends on it.
 app.set('trust proxy', 1);
-app.use(express.json());
+// 2 MB so a job post can carry up to 3 compressed photos (see
+// /v1/human-jobs). Anything bigger is rejected by the photo check.
+app.use(express.json({ limit: '2mb' }));
 // Malformed JSON bodies get a 400 (not a 500). For POST /mcp the
 // JSON-RPC parse error -32700 applies instead (C4, audit Nov 5-6).
 app.use((err, req, res, next) => {
@@ -57,6 +59,28 @@ function withSplit(job) {
   if (!job || job.payout == null || job.fee == null) return job;
   const pay = Number(job.payout), fee = Number(job.fee);
   return { ...job, poster_pays: escrowForCents(pay, fee), worker_gets: workerGetsCents(pay, fee) };
+}
+// Job photos (Nov 7 2026): up to 3, stored as a JSON array of data URLs
+// in jobs.photos. The browser compresses them first (max ~1000px,
+// JPEG ~0.72), so each is usually 100–250 KB. Server cap: 500 KB of
+// base64 per photo, 3 photos max, image data URLs only.
+const MAX_JOB_PHOTOS = 3;
+const MAX_PHOTO_CHARS = 500000;
+function validatePhotos(input) {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new Error('photos must be a list');
+  if (input.length > MAX_JOB_PHOTOS) throw new Error('Up to 3 photos per job');
+  for (const p of input) {
+    if (typeof p !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(p) || p.length > MAX_PHOTO_CHARS) {
+      throw new Error('Photos must be JPEG, PNG or WebP images, up to 3');
+    }
+  }
+  return input;
+}
+function parsePhotos(stored) {
+  if (!stored) return [];
+  try { const a = JSON.parse(stored); return Array.isArray(a) ? a.filter(p => typeof p === 'string' && p.startsWith('data:image/')) : []; }
+  catch (_) { return []; }
 }
 
 // ---------- Database ----------
@@ -170,6 +194,7 @@ const SCHEMA = [
     manage_code TEXT,
     claim_code TEXT,
     claim_contact TEXT DEFAULT '',
+    photos TEXT DEFAULT '',
     is_new_member INTEGER NOT NULL DEFAULT 0,
     new_member_until TEXT DEFAULT '',
     new_member_label TEXT DEFAULT '',
@@ -373,6 +398,7 @@ async function initSchema() {
     'ALTER TABLE jobs ADD COLUMN manage_code TEXT',
     'ALTER TABLE jobs ADD COLUMN claim_code TEXT',
     "ALTER TABLE jobs ADD COLUMN claim_contact TEXT DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN photos TEXT DEFAULT ''",
     // New-member gratitude highlight (Nov 6 2026): flag + window end +
     // badge label stored at post time; GET endpoints recompute the
     // live status from new_member_until so expiry is automatic.
@@ -792,9 +818,11 @@ app.post('/v1/jobs', agentAuth, async (req, res, next) => {
 app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
   try {
     if (await freezeBlocked(req, res)) return;
-    const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed' } = req.body || {};
+    const { title, description = '', payout, location = '', contact = '', pricing_mode = 'fixed', photos } = req.body || {};
     const mode = pricing_mode === 'open_bid' ? 'open_bid' : 'fixed';
     if (!title || !contact) return res.status(400).json({ error: 'title and contact are required' });
+    let photoList;
+    try { photoList = validatePhotos(photos); } catch (e) { return res.status(400).json({ error: e.message }); }
     let pay = 0; // cents; the form sends whole dollars, converted here
     if (mode === 'open_bid') {
       // Open-bid jobs take no price at posting — a supplied payout is a
@@ -826,11 +854,13 @@ app.post('/v1/human-jobs', rateLimit('human-jobs'), async (req, res, next) => {
                   payout: pay, fee, location: String(location).trim().slice(0, 120),
                   contact: String(contact).trim().slice(0, 120),
                   status: 'open', pricing_mode: mode, manage_code, created_at: now(),
+                  photos: photoList,
                   is_new_member: win ? 1 : 0, new_member_until: win ? win.until : '', new_member_label: win ? win.label : '' };
-    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, manage_code, created_at, is_new_member, new_member_until, new_member_label)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, ?, ?)`,
+    await dbRun(`INSERT INTO jobs (id, agent_id, title, description, location, contact, payout, fee, status, pricing_mode, escrowed, manage_code, created_at, photos, is_new_member, new_member_until, new_member_label)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, ?, ?, ?)`,
       [job.id, job.agent_id, job.title, job.description, job.location, job.contact,
        job.payout, job.fee, job.pricing_mode, job.manage_code, job.created_at,
+       JSON.stringify(photoList),
        job.is_new_member, job.new_member_until, job.new_member_label]);
     const { contact: _contact, ...jobOut } = job;
     res.status(201).json({ ...withSplit(jobOut), escrowed: 0, poster_display: displayFor(member, null), payment_note: 'Payment not yet held — the club will arrange it with the poster before work starts. The 7% fee is split evenly: on a $100 job the poster pays $103.50 and the worker gets $96.50.' });
@@ -1014,11 +1044,12 @@ app.get('/v1/jobs', async (req, res, next) => {
     // Contact is fetched only to resolve the poster's public display
     // name — it is stripped before responding and never exposed.
     const jobs = await dbAll(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
-                             is_new_member, new_member_until, new_member_label
+                             photos, is_new_member, new_member_until, new_member_label
                              FROM jobs WHERE status = ? ORDER BY (new_member_until > ?) DESC, created_at DESC`, [status, now()]);
     const out = [];
     for (const j of jobs) {
       const row = withSplit(withNewMember(j));
+      row.photos = parsePhotos(j.photos);
       // Public poster name: '@tag' when the poster is a member with a
       // tag, else the member's first name; null when the poster is not
       // a member (agent jobs, or a non-member human poster) — the card
@@ -1035,10 +1066,11 @@ app.get('/v1/jobs', async (req, res, next) => {
 app.get('/v1/jobs/:id', async (req, res, next) => {
   try {
     const j = await dbGet(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
-                           is_new_member, new_member_until, new_member_label
+                           photos, is_new_member, new_member_until, new_member_label
                            FROM jobs WHERE id = ?`, [req.params.id]);
     if (!j) return res.status(404).json({ error: 'Job not found' });
     const row = withSplit(withNewMember(j));
+    row.photos = parsePhotos(j.photos);
     row.poster_display = await displayNameByContact(j.contact, null);
     delete row.contact;
     res.json(row);
