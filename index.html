@@ -98,6 +98,21 @@
 </header>
 
 <p id="freeze-banner" hidden style="border:3px solid #f2c94c; background:#5a2f85; border-radius:12px; padding:14px 18px; text-align:center; font-weight:700;">⏸️ The club is paused for a quick update — posting, claiming and joining are frozen for a bit. Browsing still works.</p>
+<p id="job-posted-banner" hidden style="border:3px solid #f2c94c; background:#5a2f85; border-radius:12px; padding:14px 18px; text-align:center; font-weight:700;"></p>
+<script>
+// After posting a job the poster is sent back to the top of the
+// homepage (not to the Open jobs / bid form). The confirmation —
+// job ID + manage code — is carried across the redirect in
+// sessionStorage and shown in the banner above, so it is not lost.
+(function () {
+  var b = document.getElementById('job-posted-banner');
+  if (!b) return;
+  try {
+    var t = sessionStorage.getItem('ttum_job_posted');
+    if (t) { b.textContent = t; b.hidden = false; sessionStorage.removeItem('ttum_job_posted'); }
+  } catch (e) {}
+})();
+</script>
 <script>
 // Freeze banner + admin bypass key: when the page is opened with
 // ?key=<ADMIN_KEY> (Mat's link), the key rides along on job/join
@@ -494,11 +509,16 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
     // The server returns the job's id and a one-time manage code — show
     // both so the poster can find the job's bids in "Manage my job" below.
     var codeLine = data.manage_code ? " Your manage code is " + data.manage_code + " — keep this code, it's how you accept or decline bids on this job. Don't share it." : '';
-    msg.textContent = "Posted! It's in Open jobs now. Your job ID is " + (data.id || 'shown on the job card') + "." + codeLine + " We'll be in touch to arrange payment before work starts; nothing is held yet.";
+    var postedText = "Posted! It's in Open jobs now. Your job ID is " + (data.id || 'shown on the job card') + "." + codeLine + " We'll be in touch to arrange payment before work starts; nothing is held yet.";
+    msg.textContent = postedText;
     e.target.reset();
     updateFeeLine();
-    location.hash = '#jobs';
-    location.reload();
+    // Send the poster back to the top of the homepage — NOT to the
+    // Open jobs / bid form, which confused posters into thinking they
+    // had to bid on their own job. Carry the confirmation across the
+    // redirect so the job ID + manage code still show at the top.
+    try { sessionStorage.setItem('ttum_job_posted', postedText); } catch (e) {}
+    location.href = location.pathname + location.search;
   } catch (err) {
     // Show the server's plain message when there is one (e.g. the club
     // freeze) so the person knows what happened.
