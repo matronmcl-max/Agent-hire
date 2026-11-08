@@ -204,6 +204,23 @@ try { adminKey = new URLSearchParams(location.search).get('key') || ''; } catch 
     <button type="submit">Mark it done</button>
     <div id="done-msg"></div>
   </form>
+  <form class="join" id="start-form" style="margin-top:24px;">
+    <p class="center" style="margin-bottom:16px;"><strong>Start a job — both sides confirm</strong><br><span class="muted">Met in person and swapped codes? Each side enters the <em>other</em> side's code — the poster enters the worker's claim code, the worker enters the poster's manage code. Each on your own time, however you meet. When both codes are in, the job is started.</span></p>
+    <label>Job ID
+      <input type="text" id="start-job-id" required maxlength="40" placeholder="e.g. job_abc123">
+    </label>
+    <label>I am
+      <select id="start-side" required style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:#341a52; color:var(--fg);">
+        <option value="poster">The poster — I enter the worker's claim code</option>
+        <option value="worker">The worker — I enter the poster's manage code</option>
+      </select>
+    </label>
+    <label>The other side's code
+      <input type="text" id="start-code" required maxlength="80" placeholder="The code they gave you when you met">
+    </label>
+    <button type="submit">Confirm we're starting</button>
+    <div id="start-msg"></div>
+  </form>
 </section>
 
   <figure class="hero" style="margin-top:32px;"><img src="/images/spokane-river-rapids.jpg" alt="Spokane River rapids rushing past rocks"></figure>
@@ -823,6 +840,29 @@ document.getElementById('done-form').addEventListener('submit', async (e) => {
     e.target.reset();
   } catch (err) {
     msg.textContent = 'Hmm, that didn\u2019t go through — check the job ID, the name you claimed it with, and your claim code.';
+  }
+});
+// Mutual start by code exchange: each side enters the OTHER side's code.
+// POST /v1/jobs/:id/start {side, code} — poster enters the claim code,
+// worker enters the manage code. Both in = job started.
+document.getElementById('start-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var jobId = document.getElementById('start-job-id').value.trim();
+  var side = document.getElementById('start-side').value;
+  var code = document.getElementById('start-code').value.trim();
+  var msg = document.getElementById('start-msg');
+  msg.textContent = 'Confirming…';
+  try {
+    const res = await fetch('/v1/jobs/' + encodeURIComponent(jobId) + '/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ side: side, code: code })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    msg.textContent = data.note || (data.status === 'started' ? 'Both sides confirmed — the job is started.' : 'Confirmed. Waiting for the other side to confirm.');
+    if (data.status === 'started') e.target.reset();
+  } catch (err) {
+    msg.textContent = err.message || 'Hmm, that didn\u2019t go through — check the job ID and that you entered the code the other side gave you.';
   }
 });
 // Hire prefill: a bulletin-board "Hire them" tap fills the job form with

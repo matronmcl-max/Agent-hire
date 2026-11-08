@@ -190,6 +190,9 @@ const SCHEMA = [
     created_at TEXT NOT NULL,
     completed_at TEXT,
     released_at TEXT,
+    started_at TEXT,
+    poster_started_at TEXT,
+    worker_started_at TEXT,
     escrowed INTEGER NOT NULL DEFAULT 0,
     manage_code TEXT,
     claim_code TEXT,
@@ -398,6 +401,9 @@ async function initSchema() {
     'ALTER TABLE jobs ADD COLUMN manage_code TEXT',
     'ALTER TABLE jobs ADD COLUMN claim_code TEXT',
     "ALTER TABLE jobs ADD COLUMN claim_contact TEXT DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN started_at TEXT",
+    "ALTER TABLE jobs ADD COLUMN poster_started_at TEXT",
+    "ALTER TABLE jobs ADD COLUMN worker_started_at TEXT",
     "ALTER TABLE jobs ADD COLUMN photos TEXT DEFAULT ''",
     // New-member gratitude highlight (Nov 6 2026): flag + window end +
     // badge label stored at post time; GET endpoints recompute the
@@ -1044,7 +1050,8 @@ app.get('/v1/jobs', async (req, res, next) => {
     // Contact is fetched only to resolve the poster's public display
     // name — it is stripped before responding and never exposed.
     const jobs = await dbAll(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
-                             photos, is_new_member, new_member_until, new_member_label
+                             photos, is_new_member, new_member_until, new_member_label,
+                             started_at, poster_started_at, worker_started_at
                              FROM jobs WHERE status = ? ORDER BY (new_member_until > ?) DESC, created_at DESC`, [status, now()]);
     const out = [];
     for (const j of jobs) {
@@ -1066,7 +1073,8 @@ app.get('/v1/jobs', async (req, res, next) => {
 app.get('/v1/jobs/:id', async (req, res, next) => {
   try {
     const j = await dbGet(`SELECT id, title, description, location, contact, payout, fee, status, pricing_mode, created_at,
-                           photos, is_new_member, new_member_until, new_member_label
+                           photos, is_new_member, new_member_until, new_member_label,
+                           started_at, poster_started_at, worker_started_at
                            FROM jobs WHERE id = ?`, [req.params.id]);
     if (!j) return res.status(404).json({ error: 'Job not found' });
     const row = withSplit(withNewMember(j));
@@ -1249,6 +1257,60 @@ app.post('/v1/jobs/:id/claim', rateLimit('claim'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Mutual start by code exchange (Nov 7 2026, Mat's idea): the poster and
+// the worker meet in person and swap codes. The poster holds the worker's
+// claim_code; the worker holds the poster's manage_code. Each side enters
+// the OTHER side's code here, on their own time — no need to be live at
+// once. When both sides have confirmed, the job is started and the time
+// is recorded. Before both confirm, the poster can still back out; after,
+// backing out is a dispute.
+app.post('/v1/jobs/:id/start', async (req, res, next) => {
+  try {
+    const { side, code } = req.body || {};
+    const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'claimed' && job.status !== 'started') {
+      return res.status(409).json({ error: `Job is ${job.status}, not claimed` });
+    }
+    if (side !== 'poster' && side !== 'worker') {
+      return res.status(400).json({ error: "side must be 'poster' or 'worker'" });
+    }
+    if (!code || !String(code).trim()) return res.status(400).json({ error: 'code is required' });
+    const t = now();
+    if (side === 'poster') {
+      // Poster enters the worker's claim_code.
+      if (!job.claim_code) return res.status(409).json({ error: 'This job has no claim code to confirm with' });
+      if (!codesEqual(String(code).trim(), job.claim_code)) {
+        return res.status(403).json({ error: 'Wrong code — enter the code the worker gave you' });
+      }
+      if (job.poster_started_at) {
+        return res.json({ job_id: job.id, status: job.status, poster_started: true, worker_started: !!job.worker_started_at, started_at: job.started_at || null, note: 'Poster already confirmed' });
+      }
+      await dbRun('UPDATE jobs SET poster_started_at = ? WHERE id = ?', [t, job.id]);
+    } else {
+      // Worker enters the poster's manage_code.
+      if (!job.manage_code) return res.status(409).json({ error: 'This job has no manage code to confirm with' });
+      if (!codesEqual(String(code).trim(), job.manage_code)) {
+        return res.status(403).json({ error: 'Wrong code — enter the code the poster gave you' });
+      }
+      if (job.worker_started_at) {
+        return res.json({ job_id: job.id, status: job.status, poster_started: !!job.poster_started_at, worker_started: true, started_at: job.started_at || null, note: 'Worker already confirmed' });
+      }
+      await dbRun('UPDATE jobs SET worker_started_at = ? WHERE id = ?', [t, job.id]);
+    }
+    const after = await dbGet('SELECT * FROM jobs WHERE id = ?', [job.id]);
+    let status = after.status;
+    let startedAt = after.started_at || null;
+    if (after.poster_started_at && after.worker_started_at) {
+      startedAt = after.poster_started_at > after.worker_started_at ? after.poster_started_at : after.worker_started_at;
+      await dbRun("UPDATE jobs SET status = 'started', started_at = ? WHERE id = ?", [startedAt, job.id]);
+      status = 'started';
+    }
+    res.json({ job_id: job.id, status, poster_started: !!after.poster_started_at, worker_started: !!after.worker_started_at, started_at: startedAt,
+      note: status === 'started' ? 'Both sides confirmed — the job is started.' : 'Confirmed. Waiting for the other side to confirm.' });
+  } catch (e) { next(e); }
+});
+
 // Worker marks the job complete (agent then verifies + releases).
 // Jobs claimed through /claim carry a claim_code: the code must match
 // (wrong/missing code -> 403). Legacy / bid-accepted jobs have no code
@@ -1258,7 +1320,7 @@ app.post('/v1/jobs/:id/complete', async (req, res, next) => {
     const { worker_name, claim_code } = req.body || {};
     const job = await dbGet('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status !== 'claimed') return res.status(409).json({ error: `Job is ${job.status}, not claimed` });
+    if (job.status !== 'claimed' && job.status !== 'started') return res.status(409).json({ error: `Job is ${job.status}, not claimed or started` });
     const worker = await dbGet('SELECT * FROM workers WHERE id = ?', [job.worker_id]);
     if (!worker || worker.name !== worker_name) {
       return res.status(403).json({ error: 'Only the claiming worker can complete this job' });
