@@ -1391,21 +1391,22 @@ app.post('/v1/claim-tag', rateLimit('join'), async (req, res, next) => {
 // /bug-report. Saved privately for Mat and the club — there is NO
 // public listing endpoint for either table, and contacts left here
 // ---------- Email notifications (suggestions + bug reports) ----------
-// Sends from the club Gmail using a Gmail app password stored in Render
-// env (SMTP_USER / SMTP_PASS) — never in code or chat. If not configured,
-// notifications are silently skipped and the submission still saves.
-// A failed send never fails the submission.
-let mailer;
-function notifyMat(subject, body) {
+// Sends via Resend HTTPS API (Render blocks outbound SMTP to Gmail).
+// Env: RESEND_API_KEY (never in code or chat). From is Resend's test sender
+// for now, which only delivers to the Resend account email, matronmcl@gmail.com.
+// Once dottodotdollars.com is verified in Resend, change from to
+// 'TTUM <alerts@dottodotdollars.com>'. If not configured, notifications are
+// silently skipped and the submission still saves. A failed send never fails
+// the submission.
+async function notifyMat(subject, body) {
   try {
-    if (mailer === undefined) {
-      const user = process.env.SMTP_USER, pass = process.env.SMTP_PASS;
-      mailer = (user && pass)
-        ? nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, requireTLS: true, auth: { user, pass }, connectionTimeout: 30000, greetingTimeout: 30000, socketTimeout: 60000 })
-        : null;
-    }
-    if (!mailer) return;
-    mailer.sendMail({ from: process.env.SMTP_USER, to: 'matronmcl@gmail.com', subject, text: body })
+    const key = process.env.RESEND_API_KEY;
+    if (!key) return;
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json', 'User-Agent': 'TTUM/1.0' },
+      body: JSON.stringify({ from: 'onboarding@resend.dev', to: 'matronmcl@gmail.com', subject, text: body })
+    }).then(r => { if (!r.ok) console.error('notify email failed:', r.status); })
       .catch(e => console.error('notify email failed:', e.message));
   } catch (e) { console.error('notify email failed:', e.message); }
 }
