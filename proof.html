@@ -57,8 +57,15 @@
 </header>
 
 <section>
-  <h2>Completed jobs</h2>
-  <p id="proof-note">Loading completed jobs…</p>
+  <h2>Completed jobs — work done on the site</h2>
+  <p>These jobs were posted, claimed, and marked done right here — so the site works, end to end. They were paid direct (cash or Cash App) because the payment rail isn't live yet: no money went through the club, so no fee was taken and there was nothing to release. Once payments go through the site, completed jobs will move to the released list below, with the 7% shown.</p>
+  <p id="completed-note">Loading completed jobs…</p>
+  <div id="completed-list"></div>
+</section>
+
+<section>
+  <h2>Released jobs — paid through the site</h2>
+  <p id="proof-note">Loading released jobs…</p>
   <div id="proof-list"></div>
   <div id="proof-totals"></div>
 </section>
@@ -79,22 +86,51 @@
 </section>
 
 <footer>
-  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane &amp; Coeur d'Alene.
+  <a href="/">DotToDotDollars</a> — the gig club. Serving Spokane.
 </footer>
 </div>
 <script>
+// Completed jobs (work done, paid direct) — shown separately from
+// released jobs, with the payment situation explained next to them.
+// Released jobs are the ones paid through the site, with the 7% shown.
+function money(cents) { var d = Number(cents || 0) / 100; return d % 1 === 0 ? String(d) : d.toFixed(2); }
+function esc(s) { return String(s || '').replace(/</g, '&lt;'); }
+fetch('/v1/jobs?status=completed').then(function (r) { return r.json(); }).then(function (d) {
+  var jobs = (d && d.jobs) || [];
+  var note = document.getElementById('completed-note');
+  var list = document.getElementById('completed-list');
+  if (!jobs.length) { note.textContent = 'No jobs completed yet.'; return; }
+  note.textContent = jobs.length + ' completed job' + (jobs.length === 1 ? '' : 's') + ':';
+  list.innerHTML = jobs.map(function (j) {
+    var pay = Number(j.payout || 0);
+    // First completed job (Nov 7): bid $40 on the site, paid $40 direct
+    // via Cash App — the job record itself holds $0 because the payment
+    // rail wasn't live and no money went through the site.
+    var paidLine = j.id === 'job_9232ce0110ff5a83'
+      ? '<p>Agreed price: <span class="money">$40</span> — paid direct via Cash App, outside the site.</p>'
+      : pay > 0
+      ? '<p>Agreed price: <span class="money">$' + money(pay) + '</span> — paid direct, outside the site.</p>'
+      : '<p>Agreed on the site, paid direct outside the site — no money went through the club.</p>';
+    return '<div class="card"><h3>' + esc(j.title) + '</h3>'
+      + (j.location ? '<p>📍 ' + esc(j.location) + '</p>' : '')
+      + paidLine
+      + '<p>Club fee: <span class="money">$0</span> — payment rail not live yet, nothing held, nothing to release.</p>'
+      + '<p>Status: Completed</p></div>';
+  }).join('');
+}).catch(function () {
+  document.getElementById('completed-note').textContent = 'Could not load completed jobs right now — try again in a bit.';
+});
 fetch('/v1/jobs?status=released').then(function (r) { return r.json(); }).then(function (d) {
   var jobs = (d && d.jobs) || [];
   var note = document.getElementById('proof-note');
   var list = document.getElementById('proof-list');
   var totals = document.getElementById('proof-totals');
   if (!jobs.length) {
-    note.textContent = 'No jobs have been completed and released yet. When the first one is, it will appear here — anonymized, with its payout and 7% fee shown.';
+    note.textContent = 'No jobs have been released through the payment rail yet. When the first one is, it will appear here — anonymized, with its payout and 7% fee shown.';
     return;
   }
-  note.textContent = jobs.length + ' completed job' + (jobs.length === 1 ? '' : 's') + ':';
+  note.textContent = jobs.length + ' released job' + (jobs.length === 1 ? '' : 's') + ':';
   // Amounts from the API are integer cents; the 7% fee is split evenly.
-  function money(cents) { var d = Number(cents || 0) / 100; return d % 1 === 0 ? String(d) : d.toFixed(2); }
   var paid = 0, fees = 0, posters = 0;
   list.innerHTML = jobs.map(function (j) {
     var t = String(j.title || 'Job').replace(/</g, '&lt;');
@@ -113,7 +149,7 @@ fetch('/v1/jobs?status=released').then(function (r) { return r.json(); }).then(f
     + '<tr><th>Total paid to workers</th><td class="money">$' + money(paid) + '</td></tr>'
     + '<tr><th>Total club fees (7%)</th><td class="money">$' + money(fees) + '</td></tr></table>';
 }).catch(function () {
-  document.getElementById('proof-note').textContent = 'Could not load completed jobs right now — try again in a bit.';
+  document.getElementById('proof-note').textContent = 'Could not load released jobs right now — try again in a bit.';
 });
 </script>
 <script>
